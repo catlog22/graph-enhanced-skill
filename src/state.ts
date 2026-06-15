@@ -35,5 +35,19 @@ export function saveState(state: GesState, filePath: string): void {
 
   const tmpPath = filePath + '.tmp';
   writeFileSync(tmpPath, stringifyYaml(state), 'utf-8');
-  renameSync(tmpPath, filePath);
+  retryRename(tmpPath, filePath);
+}
+
+function retryRename(src: string, dest: string, attempts = 3): void {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      renameSync(src, dest);
+      return;
+    } catch (err: any) {
+      if (i === attempts - 1 || err.code !== 'EBUSY') throw err;
+      const wait = (i + 1) * 10;
+      const end = Date.now() + wait;
+      while (Date.now() < end) { /* spin */ }
+    }
+  }
 }

@@ -101,9 +101,9 @@ describe('executor', () => {
       handlers,
     });
 
-    await executor.step(); // implement.code (prompt)
-    await executor.step(); // edge → review
-    await executor.step(); // review.check (run)
+    await executor.step(); // implement.code (prompt) → current_action = __done__
+    await executor.step(); // edge eval → review, current_action = null
+    await executor.step(); // review.check (run+prompt)
 
     assert.ok(capturedCmd.includes('maestro delegate --role review'), `Expected binding expansion, got: ${capturedCmd}`);
 
