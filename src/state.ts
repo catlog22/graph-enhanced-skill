@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, copyFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, unlinkSync, copyFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import type { GesState } from './types.js';
@@ -25,29 +25,26 @@ export function saveState(state: GesState, filePath: string): void {
   const dir = dirname(filePath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
-  // Protected Data Store: backup → write temp → rename
   if (existsSync(filePath)) {
-    const backupDir = resolve(dir, '.backups');
-    if (!existsSync(backupDir)) mkdirSync(backupDir, { recursive: true });
-    const ts = new Date().toISOString().replace(/[:.]/g, '-');
-    copyFileSync(filePath, resolve(backupDir, `graph-state.${ts}.bak`));
+    try {
+      const backupDir = resolve(dir, '.backups');
+      if (!existsSync(backupDir)) mkdirSync(backupDir, { recursive: true });
+      const ts = new Date().toISOString().replace(/[:.]/g, '-');
+      copyFileSync(filePath, resolve(backupDir, `graph-state.${ts}.bak`));
+    } catch { /* backup failure is non-fatal */ }
   }
 
+  const content = stringifyYaml(state);
   const tmpPath = filePath + '.tmp';
-  writeFileSync(tmpPath, stringifyYaml(state), 'utf-8');
-  retryRename(tmpPath, filePath);
-}
-
-function retryRename(src: string, dest: string, attempts = 3): void {
-  for (let i = 0; i < attempts; i++) {
-    try {
-      renameSync(src, dest);
-      return;
-    } catch (err: any) {
-      if (i === attempts - 1 || err.code !== 'EBUSY') throw err;
-      const wait = (i + 1) * 10;
-      const end = Date.now() + wait;
-      while (Date.now() < end) { /* spin */ }
+  writeFileSync(tmpPath, content, 'utf-8');
+  try {
+    renameSync(tmpPath, filePath);
+  } catch (err: any) {
+    if (err.code === 'EBUSY' || err.code === 'EPERM') {
+      writeFileSync(filePath, content, 'utf-8');
+      try { unlinkSync(tmpPath); } catch { /* ignore */ }
+    } else {
+      throw err;
     }
   }
 }
