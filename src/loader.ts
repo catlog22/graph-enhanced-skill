@@ -63,8 +63,8 @@ function validate(graph: GesGraph, filePath: string): void {
       if (!action.id) errors.push(`Action in node "${nodeId}" missing id`);
       if (actionIds.has(action.id)) errors.push(`Duplicate action id "${action.id}" in node "${nodeId}"`);
       actionIds.add(action.id);
-      if (!action.prompt && !action.run) {
-        errors.push(`Action "${action.id}" in node "${nodeId}" must have prompt or run`);
+      if (!action.prompt && !action.run && !action.call) {
+        errors.push(`Action "${action.id}" in node "${nodeId}" must have prompt, run, or call`);
       }
     }
   }

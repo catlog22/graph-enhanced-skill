@@ -6,7 +6,8 @@ import { GesExecutor } from './executor.js';
 import { loadGraph } from './loader.js';
 import { loadState } from './state.js';
 import { createSession, listSessions, resolveSession } from './sessions.js';
-import type { GesEvent, ExecutorHandlers, PromptContext, RunResult } from './types.js';
+import { loadPlatform, loadPlatformFrom } from './platform.js';
+import type { GesEvent, ExecutorHandlers, PromptContext, RunResult, GesPlatformConfig } from './types.js';
 
 const [,, command, ...args] = process.argv;
 
@@ -271,6 +272,10 @@ function createCliHandlers(): ExecutorHandlers {
         return { exitCode: err.status ?? 1, stdout: err.stdout?.toString() ?? '', stderr: err.stderr?.toString() ?? '' };
       }
     },
+    async onToolCall(tool: string, params: Record<string, unknown>): Promise<string> {
+      console.log(`  [tool]   ${tool}(${JSON.stringify(params).slice(0, 80)})`);
+      return '';
+    },
     async onVerifySelf(expression: string): Promise<boolean> {
       console.log(`  [verify] ${truncate(expression, 100)}`);
       return true;
@@ -285,6 +290,7 @@ function createCliHandlers(): ExecutorHandlers {
         case 'node_exit':  console.log(`  -> ${event.edge_to}`); break;
         case 'action_skip': console.log(`  [skip] ${event.action}: ${event.reason}`); break;
         case 'verify_fail': console.log(`  [FAIL] ${event.action}`); break;
+        case 'tool_resolve': console.log(`  [resolve] ${event.tool} → ${truncate(event.resolved, 80)}`); break;
         case 'stuck': console.error(`  STUCK at ${event.node}`); break;
         case 'done': console.log('\nGraph complete.'); break;
       }

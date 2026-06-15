@@ -1,0 +1,40 @@
+# Claude Code / Maestro 平台配置
+version: 1
+platform: claude-code
+
+# ── 执行解析 — call: xxx 如何执行 ──
+tools:
+  agent:
+    resolve: "maestro delegate '{{prompt}}' --role {{role}} --mode {{mode}}"
+    input: stdin
+  ask:
+    resolve: native
+  search:
+    resolve: "maestro search '{{query}}' --json"
+    output: json
+  review:
+    resolve: "maestro delegate '{{prompt}}' --role review --mode analysis"
+    input: stdin
+  test:
+    resolve: "npm test"
+
+# ── 提示词别名 — {{platform.xxx}} 在 prompt 中替换为平台工具名 ──
+# 值可以是：
+#   1. 纯名称：      ask_user: AskUserQuestion
+#   2. 调用模板：     ask_call: "AskUserQuestion({ question: '{{question}}' })"
+#      调用模板中的 {{}} 会做二次展开，引用 state variables 或 with 参数
+aliases:
+  # 工具名称（纯替换）
+  ask_user: AskUserQuestion
+  spawn_agent: Agent
+  search_code: Grep
+  read_file: Read
+  write_file: Write
+  edit_file: Edit
+  run_command: Bash
+  create_task: TaskCreate
+  list_files: Glob
+
+  # 调用模板（带参数）
+  ask_call: "AskUserQuestion({ questions: [{ question: '{{question}}', options: {{options}} }] })"
+  agent_call: "Agent({ prompt: '{{agent_prompt}}', subagent_type: '{{role}}' })"

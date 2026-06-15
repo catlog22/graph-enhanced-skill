@@ -1,17 +1,19 @@
 import { resolve, dirname } from 'node:path';
 import type {
   GesGraph, GesState, GesAction, GesNode, GesEvent,
-  ExecutorHandlers, PromptContext,
+  ExecutorHandlers, PromptContext, GesPlatformConfig,
 } from './types.js';
 import { loadGraph, loadPrompt } from './loader.js';
 import { createState, loadState, saveState } from './state.js';
 import { expandRun, expandTemplate } from './bindings.js';
+import { loadPlatform, loadPlatformFrom, resolveTool } from './platform.js';
 
 export interface ExecutorOptions {
   gesFile: string;
   stateDir: string;
   handlers: ExecutorHandlers;
   resume?: boolean;
+  platform?: GesPlatformConfig | string;
 }
 
 export class GesExecutor {
@@ -21,6 +23,7 @@ export class GesExecutor {
   private stateFile: string;
   private handlers: ExecutorHandlers;
   private bindings: Record<string, string>;
+  private platform: GesPlatformConfig | null;
 
   constructor(opts: ExecutorOptions) {
     this.gesFile = resolve(opts.gesFile);
@@ -28,6 +31,9 @@ export class GesExecutor {
     this.bindings = this.graph.bindings ?? {};
     this.handlers = opts.handlers;
     this.stateFile = resolve(opts.stateDir, 'graph-state.yaml');
+    this.platform = opts.platform
+      ? (typeof opts.platform === 'string' ? loadPlatformFrom(opts.platform) : opts.platform)
+      : loadPlatform(dirname(this.gesFile));
 
     if (opts.resume) {
       const saved = loadState(this.stateFile);
@@ -143,17 +149,19 @@ export class GesExecutor {
 
   private async executeAction(nodeId: string, action: GesAction): Promise<void> {
     const ctx = this.context(nodeId, action.id);
+    const hasCall = !!action.call;
     const hasRun = !!action.run;
     const hasPrompt = !!action.prompt;
-    const mode = hasRun && hasPrompt ? 'prompt+run' : hasRun ? 'run' : 'prompt';
+    const mode = hasCall ? 'call' : hasRun && hasPrompt ? 'prompt+run' : hasRun ? 'run' : 'prompt';
 
     this.emit({ type: 'action_start', node: nodeId, action: action.id, mode });
 
     let result: string | undefined;
 
     try {
-      if (hasRun && hasPrompt) {
-        // run + prompt: tool executes with prompt as input
+      if (hasCall) {
+        result = await this.executeToolCall(nodeId, action, ctx);
+      } else if (hasRun && hasPrompt) {
         const cmd = this.expandCommand(action.run!);
         const promptText = this.resolvePrompt(action.prompt!);
         const runResult = await this.handlers.onRun(cmd, promptText);
@@ -206,6 +214,33 @@ export class GesExecutor {
     return result.exitCode === 0;
   }
 
+  private async executeToolCall(nodeId: string, action: GesAction, ctx: PromptContext): Promise<string | undefined> {
+    const expandedWith: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(action.with ?? {})) {
+      expandedWith[k] = typeof v === 'string' ? expandTemplate(v, this.templateVars()) : v;
+    }
+
+    const promptText = action.prompt ? this.resolvePrompt(action.prompt) : undefined;
+
+    const resolved = resolveTool(action.call!, expandedWith, promptText, this.platform);
+    this.emit({ type: 'tool_resolve', tool: action.call!, resolved: resolved.command });
+
+    if (resolved.mode === 'native') {
+      if (this.handlers.onToolCall) {
+        const params = { ...expandedWith };
+        if (promptText) params['prompt'] = promptText;
+        return this.handlers.onToolCall(action.call!, params, ctx);
+      }
+      return this.handlers.onPrompt(
+        `[${action.call}] ${promptText ?? JSON.stringify(expandedWith)}`,
+        ctx,
+      );
+    }
+
+    const runResult = await this.handlers.onRun(resolved.command, resolved.input);
+    return runResult.stdout;
+  }
+
   private async evaluateEdges(fromNode: string): Promise<string> {
     const candidates = this.graph.edges.filter(e => e.from === fromNode);
     if (candidates.length === 0) {
@@ -221,7 +256,7 @@ export class GesExecutor {
         result = true;
       } else {
         result = await this.handlers.onEdgeEval(
-          expandTemplate(edge.when, this.state.variables),
+          expandTemplate(edge.when, this.templateVars()),
           ctx,
         );
       }
@@ -234,13 +269,23 @@ export class GesExecutor {
   }
 
   private expandCommand(run: string): string {
-    return expandTemplate(expandRun(run, this.bindings), this.state.variables);
+    return expandTemplate(expandRun(run, this.bindings), this.templateVars());
   }
 
   private resolvePrompt(prompt: string): string {
     const isPath = prompt.startsWith('./') || prompt.startsWith('../');
     const raw = isPath ? loadPrompt(prompt, this.gesFile) : prompt;
-    return expandTemplate(raw, this.state.variables);
+    const first = expandTemplate(raw, this.templateVars());
+    if (first.includes('{{')) return expandTemplate(first, this.templateVars());
+    return first;
+  }
+
+  private templateVars(): Record<string, unknown> {
+    const vars: Record<string, unknown> = { ...this.state.variables };
+    if (this.platform?.aliases) {
+      vars['platform'] = this.platform.aliases;
+    }
+    return vars;
   }
 
   private resolveExpression(expr: string): unknown {

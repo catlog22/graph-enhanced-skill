@@ -24,6 +24,8 @@ export interface GesAction {
   id: string;
   prompt?: string;
   run?: string;
+  call?: string;
+  with?: Record<string, unknown>;
   output?: string[];
   verify?: string | { run: string };
   loop?: { over: string; as: string };
@@ -70,18 +72,20 @@ export interface CallFrame {
 export type GesEvent =
   | { type: 'node_enter'; node: string }
   | { type: 'node_exit'; node: string; edge_to: string }
-  | { type: 'action_start'; node: string; action: string; mode: 'prompt' | 'run' | 'prompt+run' }
+  | { type: 'action_start'; node: string; action: string; mode: 'prompt' | 'run' | 'prompt+run' | 'call' }
   | { type: 'action_done'; node: string; action: string; output?: Record<string, unknown> }
   | { type: 'action_skip'; node: string; action: string; reason: string }
   | { type: 'verify_pass'; node: string; action: string }
   | { type: 'verify_fail'; node: string; action: string; detail: string }
   | { type: 'edge_eval'; from: string; to: string; when: string | undefined; result: boolean }
   | { type: 'stuck'; node: string; edges_tried: number }
+  | { type: 'tool_resolve'; tool: string; resolved: string }
   | { type: 'done' };
 
 export interface ExecutorHandlers {
   onPrompt(instruction: string, context: PromptContext): Promise<string>;
   onRun(command: string, input?: string): Promise<RunResult>;
+  onToolCall?(tool: string, params: Record<string, unknown>, context: PromptContext): Promise<string>;
   onVerifySelf(expression: string, context: PromptContext): Promise<boolean>;
   onEdgeEval(expression: string, context: PromptContext): Promise<boolean>;
   onEvent?(event: GesEvent): void;
@@ -98,4 +102,19 @@ export interface RunResult {
   exitCode: number;
   stdout: string;
   stderr: string;
+}
+
+// ── Platform Configuration ──
+
+export interface GesPlatformConfig {
+  version: number;
+  platform: string;
+  tools: Record<string, GesPlatformTool>;
+  aliases?: Record<string, string>;
+}
+
+export interface GesPlatformTool {
+  resolve: string;
+  input?: 'stdin' | 'arg';
+  output?: 'stdout' | 'json';
 }

@@ -1,0 +1,73 @@
+# 平台无关的审查循环 — 使用通用工具调用
+# 同一个图在 Claude Code / Cursor / Aider / Codex 上运行
+# 切换 ges.platform.yaml 即可，图本身不变
+schema: ges/1.0
+meta: { name: review-with-tools, entry: implement, terminal: [done] }
+
+nodes:
+  implement:
+    actions:
+      - id: code
+        prompt: |
+          按需求实现代码变更。
+          使用 {{platform.edit_file}} 修改文件，{{platform.run_command}} 运行构建验证。
+
+  review:
+    actions:
+      # call: agent → 通过平台配置解析为具体 agent 调用方式
+      - id: analyze
+        call: agent
+        with: { role: review, mode: analysis }
+        prompt: |
+          审查以下代码变更：
+          - 检查正确性和边界条件
+          - 检查代码风格一致性
+          - 检查安全性
+          使用 {{platform.search_code}} 搜索相关代码上下文。
+        output: [review_result]
+
+      # call: ask → Claude Code 解析为 AskUserQuestion，Codex 解析为 request_user_input
+      - id: confirm
+        call: ask
+        with:
+          question: "审查完成，是否接受结果？"
+          options: [accept, reject, modify]
+        output: [user_decision]
+
+  fix:
+    actions:
+      - id: search_similar
+        call: search
+        with: { query: "{{review_result.pattern}}" }
+        output: [similar_code]
+        optional: true
+
+      - id: apply_fix
+        prompt: |
+          修复审查发现的问题：
+          {{review_result.issues}}
+
+          使用 {{platform.read_file}} 读取相关文件，{{platform.edit_file}} 应用修改。
+
+  verify:
+    actions:
+      - id: run_tests
+        call: test
+        output: [test_result]
+
+      - id: re_review
+        call: review
+        prompt: |
+          验证修复是否正确解决了审查问题。
+          使用 {{platform.search_code}} 确认修改范围完整。
+        output: [verify_result]
+
+edges:
+  - { from: implement, to: review }
+  - { from: review, to: done,   when: "user_decision == 'accept'" }
+  - { from: review, to: fix,    when: "user_decision == 'reject'" }
+  - { from: review, to: review, when: "user_decision == 'modify'" }
+  - { from: fix, to: verify }
+  - { from: verify, to: done,   when: "verify_result.pass" }
+  - { from: verify, to: fix,    when: "!verify_result.pass && iteration < 3" }
+  - { from: verify, to: done,   when: "iteration >= 3" }
