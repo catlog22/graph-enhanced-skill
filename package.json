@@ -1,0 +1,27 @@
+{
+  "name": "ges",
+  "version": "1.0.0",
+  "description": "将 AI Agent Skill 内部的状态机从散文描述提升为 YAML 图结构，确保每个步骤准确执行。",
+  "main": "dist/cli.js",
+  "bin": {
+    "ges": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli.ts",
+    "test": "tsx --test src/__tests__/*.test.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "ajv": "^8.20.0",
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3"
+  }
+}

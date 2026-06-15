@@ -1,5 +1,7 @@
 node_modules/
 .workflow/
+.ges-sessions/
 *.log
+*.tmp
 .DS_Store
 Thumbs.db
