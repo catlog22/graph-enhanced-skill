@@ -274,7 +274,33 @@ bindings:
 
 ---
 
-## 7. 运行时状态（graph-state.yaml）
+## 7. 输入 Schema
+
+每个 skill 可声明输入契约，用于交接验证和自文档化：
+
+```yaml
+meta:
+  name: deploy
+  entry: prepare
+  terminal: [done]
+  input:                               # JSON Schema 子集
+    type: object
+    required: [artifact_path]
+    properties:
+      artifact_path: { type: string, description: "构建产物路径" }
+      environment:   { type: string, default: staging }
+      version:       { type: string }
+```
+
+**规则**：
+- `meta.input` 可选——无声明的 skill 接受任意输入
+- 格式为 JSON Schema 子集（`type`, `required`, `properties`, `default`, `description`）
+- 执行器在 `INIT` 时用输入 schema 验证初始 variables
+- 交接（handoff）时目标 skill 的 input schema 用于验证 payload
+
+---
+
+## 8. 运行时状态（graph-state.yaml）
 
 ```yaml
 schema: ges-runtime/1.0
@@ -290,62 +316,123 @@ variables:
   prior_knowledge: { ... }
 
 call_stack: []
+
+handoff: null                          # 或 { target, payload, status }
 ```
 
-**只有 5 个字段**。历史记录交给 `evidence.ndjson`，不膨胀状态文件。
+历史记录交给 `evidence.ndjson`，不膨胀状态文件。
 
-### 7.1 嵌套 skill_call 的状态隔离
+### 8.1 嵌套 skill_call（调用-返回）
 
 ```yaml
-# 父 skill
+# run 引用 .ges.yaml → 自动识别为 skill_call
 - id: deep_analyze
-  run: odyssey-planex               # 调用另一个 GES skill
-  prompt: "{{sub_requirement}}"
-  output: [planex_result]
+  run: ./planex.ges.yaml
+  prompt: "{{sub_requirement}}"        # → 子图 _input 变量
+  output: [planex_result]              # 仅这些 key 从子图冒泡回父
 ```
 
-子 skill 生成独立状态文件 `graph-state.odyssey-planex.yaml`，variables 互不污染。完成后仅 output 声明的变量冒泡到父。
+**语义**：call/return——子图跑完后父图继续。
+
+- 子图独立状态文件 `graph-state.{child_name}.yaml`
+- variables 互不污染，仅 `output` 声明的 key 冒泡
+- `prompt` 传入子图作为 `_input` 变量
+- `call_stack` 记录调用帧，支持断点恢复
+
+### 8.2 交接 handoff（控制权转移）
+
+```yaml
+edges:
+  - from: record
+    to: end
+    handoff:                           # 到达终态时建议交接
+      target: ./deploy.ges.yaml
+      map:                             # 当前 variables → 目标 input 映射
+        artifact_path: "{{build_output}}"
+        environment: production
+        version: "{{release_version}}"
+```
+
+**语义**：transfer——当前 skill 结束，控制权永久转移到目标 skill，不回来。
+
+| | 嵌套 skill_call | 交接 handoff |
+|---|---|---|
+| 触发 | `run: ./child.ges.yaml` | edge 上的 `handoff` 字段 |
+| 控制流 | call → child runs → return → parent continues | current ends → target starts |
+| 数据 | `prompt` → `_input`；`output` keys 冒泡 | `map` 映射 → 目标 `meta.input` 验证 |
+| 状态 | 子图独立文件，父 call_stack 记录 | 当前 session 标记 `handed_off`，新 session 创建 |
+
+**执行器协议**：
+
+```
+当 edge 匹配且含 handoff：
+  1. payload = expand(handoff.map, current_variables)
+  2. target_graph = load(handoff.target)
+  3. if target_graph.meta.input → validate(payload, input_schema)
+  4. state.handoff = { target, payload, status: "pending" }
+  5. PERSIST → current session 到达终态
+
+用户执行 `ges handoff <session-id>`：
+  1. 读取 state.handoff
+  2. 创建目标 session，payload 注入为初始 variables
+  3. 标记源 session handoff.status = "accepted"
+```
+
+**`ges next` 行为**——当 session 到达终态且有 pending handoff：
+
+```
+Done. Session reached terminal "end".
+
+Handoff → deploy (./deploy.ges.yaml)
+  Payload: { artifact_path: "/dist/bundle.js", environment: "production" }
+
+  Accept: ges handoff <session-id>
+  Skip:   ges handoff <session-id> --skip
+```
 
 ---
 
-## 8. 执行器协议
+## 9. 执行器协议
 
 ```
 LOAD skill.ges.yaml
 EXPAND bindings（别名 → 完整命令）
 INIT graph-state.yaml { current_node: meta.entry }
+  if meta.input → VALIDATE(initial_variables, meta.input)
 
 LOOP:
   node = nodes[current_node]
 
   for action in node.actions (from current_action):
 
-    if action.run && action.prompt:
-      # 工具 + prompt：命令执行，prompt 作为输入
+    if action.run is *.ges.yaml:
+      # skill_call（嵌套）
+      child = LOAD(action.run)
+      child.variables._input = resolve(action.prompt)
+      child_state = child.RUN()
+      for key in action.output:
+        variables[key] = child_state.variables[key]
+
+    elif action.run && action.prompt:
       cmd = expand(action.run)
       input = load_prompt(action.prompt)
       result = exec(cmd, stdin=input)
 
     elif action.run:
-      # 纯工具
       result = exec(expand(action.run))
 
     elif action.prompt:
-      # 纯 LLM
       instruction = load_prompt(action.prompt)
       result = llm_execute(instruction + context)
 
-    # loop 展开
     if action.loop:
       for item in evaluate(action.loop.over):
         execute_action_with(item as action.loop.as)
 
-    # 输出捕获
     if action.output:
       for key in action.output:
         variables[key] = extract(result, key)
 
-    # 验证
     if action.verify:
       if verify is string → llm_judge(verify, context) → bool
       if verify.run → exec(verify.run) → exit_code == 0
@@ -353,22 +440,31 @@ LOOP:
     mark action done → PERSIST graph-state.yaml
 
   # 转移
+  matched_edge = null
   for edge in edges where from == current_node:
     if !edge.when || llm_judge(edge.when, context):
-      current_node = edge.to
+      matched_edge = edge
       break
-  else → ERROR: STUCK
+  if !matched_edge → ERROR: STUCK
 
-  if current_node in meta.terminal → END
+  # 交接检查
+  if matched_edge.handoff:
+    payload = expand(matched_edge.handoff.map, variables)
+    target = load(matched_edge.handoff.target)
+    if target.meta.input → validate(payload, target.meta.input)
+    state.handoff = { target, payload, status: "pending" }
+
+  current_node = matched_edge.to
+  if current_node in meta.terminal → END (with optional handoff pending)
 ```
 
-### 8.1 持久化
+### 9.1 持久化
 
 遵循 Protected Data Store 模式：`lock → backup → write temp → rename → unlock`。每个 action 完成后持久化，支持断点恢复。
 
 ---
 
-## 9. 与 SKILL.md 的共存
+## 10. 与 SKILL.md 的共存
 
 | 场景 | 行为 |
 |------|------|
@@ -378,7 +474,7 @@ LOOP:
 
 ---
 
-## 10. 从 SKILL.md 迁移
+## 11. 从 SKILL.md 迁移
 
 ```
 <states> 中的状态    → nodes 下的 key
@@ -393,9 +489,9 @@ skip_when            → edges 条件跳过
 
 ---
 
-## 11. 示例
+## 12. 示例
 
-### 11.1 最小 GES
+### 12.1 最小 GES
 
 ```yaml
 schema: ges/1.0
@@ -409,7 +505,7 @@ edges:
   - { from: start, to: end }
 ```
 
-### 11.2 带循环
+### 12.2 带循环
 
 ```yaml
 edges:
@@ -419,7 +515,7 @@ edges:
   - { from: check, to: end,  when: "retries >= 3" }
 ```
 
-### 11.3 工具调用 + 分叉回归
+### 12.3 工具调用 + 分叉回归
 
 ```yaml
 bindings:
@@ -438,7 +534,7 @@ nodes:
         prompt: 根据 {{review_result}} 调整
 ```
 
-### 11.4 平台切换
+### 12.4 平台切换
 
 ```yaml
 # 只改 bindings，图完全不变
@@ -448,7 +544,7 @@ bindings:
   # analyzer: "./scripts/call-claude-api.sh"     # API wrapper
 ```
 
-### 11.5 Agent 决策工具
+### 12.5 Agent 决策工具
 
 ```yaml
 nodes:
@@ -474,16 +570,54 @@ edges:
 
 ---
 
-## 12. 核心/扩展分层
+### 12.6 嵌套 + 交接
+
+```yaml
+schema: ges/1.0
+meta:
+  name: build-and-deploy
+  entry: build
+  terminal: [done]
+  input:
+    type: object
+    required: [repo_path]
+    properties:
+      repo_path: { type: string }
+
+nodes:
+  build:
+    actions:
+      - id: compile
+        run: "npm run build"
+        output: [build_output]
+      - id: test_sub                    # 嵌套：调用子图，返回后继续
+        run: ./test-suite.ges.yaml
+        prompt: "{{build_output}}"
+        output: [test_result]
+
+edges:
+  - from: build
+    to: done
+    handoff:                            # 交接：结束后转移到 deploy
+      target: ./deploy.ges.yaml
+      map:
+        artifact_path: "{{build_output}}"
+        test_passed: "{{test_result.pass}}"
+```
+
+---
+
+## 13. 核心/扩展分层
 
 | | Core（v1.0 必学） | Extended（按需引入） |
 |---|---|---|
-| **Meta** | `name`, `entry`, `terminal` | `description` |
+| **Meta** | `name`, `entry`, `terminal` | `description`, `input` |
 | **Bindings** | `key: "command string"` | — |
 | **Node** | `actions` | `description`, `persist` |
 | **Action** | `id`, `prompt`, `run`, `output`, `verify` | `loop`, `optional`, `retry`, `timeout`, `tools` |
-| **Edge** | `from`, `to`, `when` | `label` |
-| **State** | `current_node`, `variables`, `call_stack` | — |
+| **Edge** | `from`, `to`, `when` | `label`, `handoff` |
+| **State** | `current_node`, `variables`, `call_stack` | `handoff` |
+| **Skill 间** | — | 嵌套（`run: *.ges.yaml`）、交接（`edge.handoff`） |
 
 **Core 概念数**：3（node, edge, action）
 **Core 关键字数**：~12
@@ -491,7 +625,7 @@ edges:
 
 ---
 
-## 13. 未来扩展预留（v1.1+）
+## 14. 未来扩展预留（v1.1+）
 
 | 功能 | 描述 | 为何推迟 |
 |------|------|---------|
@@ -503,7 +637,7 @@ edges:
 
 ---
 
-## 14. 格式选择记录
+## 15. 格式选择记录
 
 **YAML** 作为图定义格式（`when: "a && b"` 零转义，`#` 注释，`|` 多行，`&`/`*` anchor）。
 **XML** 保留于 SKILL.md 标签和运行时 prompt 注入。

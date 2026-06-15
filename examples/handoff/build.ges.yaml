@@ -1,0 +1,24 @@
+# 构建 skill — 完成后交接给 deploy
+schema: ges/1.0
+meta: { name: build, entry: compile, terminal: [done] }
+
+nodes:
+  compile:
+    actions:
+      - id: build
+        prompt: 编译项目
+        output: [build_output]
+
+      - id: test
+        prompt: 运行测试
+        output: [test_result]
+
+edges:
+  - from: compile
+    to: done
+    handoff:
+      target: ./deploy.ges.yaml
+      map:
+        artifact_path: "{{build_output}}"
+        test_passed: "{{test_result}}"
+        version: "1.0.0"

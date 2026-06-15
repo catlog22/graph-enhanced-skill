@@ -1,7 +1,7 @@
 import { resolve, dirname } from 'node:path';
 import { existsSync } from 'node:fs';
 import type {
-  GesGraph, GesState, GesAction, GesNode, GesEvent,
+  GesGraph, GesState, GesAction, GesNode, GesEdge, GesEvent,
   ExecutorHandlers, PromptContext,
 } from './types.js';
 import { loadGraph, loadPrompt } from './loader.js';
@@ -56,10 +56,11 @@ export class GesExecutor {
 
       await this.executeNode(this.state.current_node, node);
 
-      const nextNode = await this.evaluateEdges(this.state.current_node);
-      this.emit({ type: 'node_exit', node: this.state.current_node, edge_to: nextNode });
+      const edge = await this.evaluateEdges(this.state.current_node);
+      this.emit({ type: 'node_exit', node: this.state.current_node, edge_to: edge.to });
+      this.processHandoff(edge);
 
-      this.state.current_node = nextNode;
+      this.state.current_node = edge.to;
       this.state.current_action = null;
       this.state.iteration = iterations;
       this.persist();
@@ -84,14 +85,14 @@ export class GesExecutor {
     const actionIndex = this.currentActionIndex(node);
 
     if (actionIndex >= node.actions.length) {
-      // All actions done → evaluate edges
-      const nextNode = await this.evaluateEdges(this.state.current_node);
-      const ev: GesEvent = { type: 'node_exit', node: this.state.current_node, edge_to: nextNode };
+      const edge = await this.evaluateEdges(this.state.current_node);
+      const ev: GesEvent = { type: 'node_exit', node: this.state.current_node, edge_to: edge.to };
       this.emit(ev);
-      this.state.current_node = nextNode;
+      this.processHandoff(edge);
+      this.state.current_node = edge.to;
       this.state.current_action = null;
       this.persist();
-      return { done: this.isTerminal(nextNode), event: ev };
+      return { done: this.isTerminal(edge.to), event: ev };
     }
 
     const action = node.actions[actionIndex];
@@ -254,7 +255,7 @@ export class GesExecutor {
     return result.exitCode === 0;
   }
 
-  private async evaluateEdges(fromNode: string): Promise<string> {
+  private async evaluateEdges(fromNode: string): Promise<GesEdge> {
     const candidates = this.graph.edges.filter(e => e.from === fromNode);
     if (candidates.length === 0) {
       this.emit({ type: 'stuck', node: fromNode, edges_tried: 0 });
@@ -274,7 +275,7 @@ export class GesExecutor {
         );
       }
       this.emit({ type: 'edge_eval', from: edge.from, to: edge.to, when: edge.when, result });
-      if (result) return edge.to;
+      if (result) return edge;
     }
 
     this.emit({ type: 'stuck', node: fromNode, edges_tried: candidates.length });
@@ -313,6 +314,26 @@ export class GesExecutor {
     return idx >= 0 ? idx : node.actions.length;
   }
 
+  private processHandoff(edge: GesEdge): void {
+    if (!edge.handoff) return;
+
+    const payload: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(edge.handoff.map)) {
+      payload[key] = typeof val === 'string' ? expandTemplate(val, this.state.variables) : val;
+    }
+
+    const targetPath = resolve(dirname(this.gesFile), edge.handoff.target);
+    if (existsSync(targetPath)) {
+      const targetGraph = loadGraph(targetPath);
+      if (targetGraph.meta.input) {
+        validateInput(payload, targetGraph.meta.input, targetGraph.meta.name);
+      }
+    }
+
+    this.state.handoff = { target: edge.handoff.target, payload, status: 'pending' };
+    this.emit({ type: 'handoff_ready', target: edge.handoff.target, payload });
+  }
+
   private isTerminal(nodeId: string): boolean {
     return this.graph.meta.terminal.includes(nodeId);
   }
@@ -341,4 +362,17 @@ function pick(obj: Record<string, unknown>, keys: string[]): Record<string, unkn
     if (k in obj) result[k] = obj[k];
   }
   return result;
+}
+
+function validateInput(payload: Record<string, unknown>, schema: { required?: string[]; properties: Record<string, { default?: unknown }> }, skillName: string): void {
+  for (const key of schema.required ?? []) {
+    if (!(key in payload) || payload[key] === undefined || payload[key] === null) {
+      const def = schema.properties[key]?.default;
+      if (def !== undefined) {
+        payload[key] = def;
+      } else {
+        throw new Error(`Handoff to "${skillName}": missing required input "${key}"`);
+      }
+    }
+  }
 }

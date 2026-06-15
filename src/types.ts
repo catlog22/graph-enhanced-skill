@@ -12,6 +12,13 @@ export interface GesMeta {
   entry: string;
   terminal: string[];
   description?: string;
+  input?: GesInputSchema;
+}
+
+export interface GesInputSchema {
+  type: 'object';
+  required?: string[];
+  properties: Record<string, { type: string; description?: string; default?: unknown }>;
 }
 
 export interface GesNode {
@@ -44,6 +51,12 @@ export interface GesEdge {
   to: string;
   when?: string;
   label?: string;
+  handoff?: GesHandoff;
+}
+
+export interface GesHandoff {
+  target: string;
+  map: Record<string, unknown>;
 }
 
 // ── Runtime State ──
@@ -56,6 +69,13 @@ export interface GesState {
   iteration: number;
   variables: Record<string, unknown>;
   call_stack: CallFrame[];
+  handoff?: GesHandoffState | null;
+}
+
+export interface GesHandoffState {
+  target: string;
+  payload: Record<string, unknown>;
+  status: 'pending' | 'accepted' | 'skipped';
 }
 
 export interface CallFrame {
@@ -75,6 +95,7 @@ export type GesEvent =
   | { type: 'action_skip'; node: string; action: string; reason: string }
   | { type: 'skill_enter'; target: string; caller_node: string; caller_action: string }
   | { type: 'skill_exit'; target: string; output_keys: string[] }
+  | { type: 'handoff_ready'; target: string; payload: Record<string, unknown> }
   | { type: 'verify_pass'; node: string; action: string }
   | { type: 'verify_fail'; node: string; action: string; detail: string }
   | { type: 'edge_eval'; from: string; to: string; when: string | undefined; result: boolean }

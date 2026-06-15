@@ -4,7 +4,8 @@ export { loadGraph, loadPrompt, resolvePromptPath } from './loader.js';
 export { createState, loadState, saveState } from './state.js';
 export { expandRun, expandTemplate } from './bindings.js';
 export type {
-  GesGraph, GesMeta, GesNode, GesAction, GesEdge, GesDecisionTool,
-  GesState, CallFrame, GesEvent,
+  GesGraph, GesMeta, GesInputSchema, GesNode, GesAction,
+  GesEdge, GesHandoff, GesDecisionTool,
+  GesState, CallFrame, GesHandoffState, GesEvent,
   ExecutorHandlers, PromptContext, RunResult,
 } from './types.js';

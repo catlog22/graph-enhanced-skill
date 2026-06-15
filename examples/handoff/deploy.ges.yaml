@@ -1,0 +1,26 @@
+# 部署 skill — 接收构建产物，执行部署
+schema: ges/1.0
+meta:
+  name: deploy
+  entry: prepare
+  terminal: [done]
+  input:
+    type: object
+    required: [artifact_path]
+    properties:
+      artifact_path: { type: string, description: "构建产物路径" }
+      test_passed: { type: string, description: "测试结果" }
+      version: { type: string, description: "版本号" }
+
+nodes:
+  prepare:
+    actions:
+      - id: check
+        prompt: "验证部署条件: artifact={{artifact_path}} test={{test_passed}}"
+
+      - id: deploy
+        prompt: "部署版本 {{version}} 到生产环境"
+        output: [deploy_result]
+
+edges:
+  - { from: prepare, to: done }

@@ -1,12 +1,13 @@
 #!/usr/bin/env node
-import { resolve } from 'node:path';
+import { resolve, dirname } from 'node:path';
 import { existsSync, mkdirSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { GesExecutor } from './executor.js';
 import { loadGraph } from './loader.js';
 import { loadState } from './state.js';
 import { createSession, listSessions, resolveSession } from './sessions.js';
-import type { GesEvent, ExecutorHandlers, PromptContext, RunResult } from './types.js';
+import { saveState } from './state.js';
+import type { GesEvent, GesState, ExecutorHandlers, PromptContext, RunResult } from './types.js';
 
 const [,, command, ...args] = process.argv;
 
@@ -19,6 +20,7 @@ Session commands:
   ges next <id>                  Advance one step (by session ID or prefix)
   ges complete <id>              Complete current node, transition to next
   ges run <id>                   Run to completion
+  ges handoff <id> [--skip]      Accept or skip pending handoff
 
 Inspection:
   ges status <id>                Show session state
@@ -34,6 +36,7 @@ async function main() {
     case 'next':     return await cmdNext(args);
     case 'complete': return await cmdComplete(args);
     case 'run':      return await cmdRun(args);
+    case 'handoff':  return cmdHandoff(args);
     case 'status':   return cmdStatus(args);
     case 'validate': return cmdValidate(args);
     case 'viz':      return cmdViz(args);
@@ -103,6 +106,7 @@ async function cmdNext(args: string[]) {
   console.log('');
   if (done) {
     console.log(`Done. Session ${session.id} reached terminal.`);
+    printHandoffHint(state, session.id);
   } else {
     const actionLabel = state.current_action && state.current_action !== '__done__' ? '.' + state.current_action : '';
     console.log(`State: ${state.current_node}${actionLabel} (iter=${state.iteration})`);
@@ -174,6 +178,9 @@ async function cmdRun(args: string[]) {
 
   const finalState = await executor.run();
   console.log(`\nDone. Final: ${finalState.current_node}`);
+
+  const sessId = stateDir.split(/[\\/]/).pop() ?? '';
+  printHandoffHint(finalState, sessId);
 }
 
 // ── status ──
@@ -284,14 +291,67 @@ function createCliHandlers(): ExecutorHandlers {
         case 'node_enter': console.log(`\n> ${event.node}`); break;
         case 'node_exit':  console.log(`  -> ${event.edge_to}`); break;
         case 'action_skip': console.log(`  [skip] ${event.action}: ${event.reason}`); break;
-        case 'skill_enter': console.log(`  [call]  → ${event.target} (from ${event.caller_node}.${event.caller_action})`); break;
-        case 'skill_exit':  console.log(`  [return] ← ${event.target} (output: ${event.output_keys.join(', ') || 'none'})`); break;
+        case 'skill_enter':   console.log(`  [call]  → ${event.target} (from ${event.caller_node}.${event.caller_action})`); break;
+        case 'skill_exit':    console.log(`  [return] ← ${event.target} (output: ${event.output_keys.join(', ') || 'none'})`); break;
+        case 'handoff_ready': console.log(`  [handoff] → ${event.target}`); break;
         case 'verify_fail': console.log(`  [FAIL] ${event.action}`); break;
         case 'stuck': console.error(`  STUCK at ${event.node}`); break;
         case 'done': console.log('\nGraph complete.'); break;
       }
     },
   };
+}
+
+// ── handoff: accept or skip pending handoff ──
+
+function cmdHandoff(args: string[]) {
+  const session = requireSession(args[0], 'handoff');
+  const skip = args.includes('--skip');
+  const statePath = resolve(session.stateDir, 'graph-state.yaml');
+  const state = loadState(statePath);
+
+  if (!state) { console.error('Session has no state.'); process.exit(1); }
+  if (!state.handoff || state.handoff.status !== 'pending') {
+    console.error('No pending handoff in this session.');
+    process.exit(1);
+  }
+
+  if (skip) {
+    state.handoff.status = 'skipped';
+    saveState(state, statePath);
+    console.log(`Handoff to "${state.handoff.target}" skipped.`);
+    return;
+  }
+
+  const targetPath = resolve(dirname(session.gesFile), state.handoff.target);
+  const targetGraph = loadGraph(targetPath);
+  const { id, stateDir } = createSession(targetPath, targetGraph.meta.name);
+
+  const executor = new GesExecutor({
+    gesFile: targetPath,
+    stateDir,
+    handlers: createCliHandlers(),
+  });
+  for (const [k, v] of Object.entries(state.handoff.payload)) {
+    executor.setVariable(k, v);
+  }
+
+  state.handoff.status = 'accepted';
+  saveState(state, statePath);
+
+  console.log(`Handoff accepted → ${targetGraph.meta.name}`);
+  console.log(`  New session: ${id}`);
+  console.log(`  Payload: ${JSON.stringify(state.handoff.payload).slice(0, 100)}`);
+  console.log(`\nNext: ges next ${id.slice(0, 12)}`);
+}
+
+function printHandoffHint(state: GesState, sessionId: string) {
+  if (!state.handoff || state.handoff.status !== 'pending') return;
+  console.log('');
+  console.log(`Handoff → ${state.handoff.target}`);
+  console.log(`  Payload: ${JSON.stringify(state.handoff.payload).slice(0, 100)}`);
+  console.log(`  Accept: ges handoff ${sessionId.slice(0, 12)}`);
+  console.log(`  Skip:   ges handoff ${sessionId.slice(0, 12)} --skip`);
 }
 
 // ── Helpers ──
