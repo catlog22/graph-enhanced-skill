@@ -1,24 +1,28 @@
 # 构建 skill — 完成后交接给 deploy
+# meta.output 声明导出变量，handoff 自动传递
 schema: ges/1.0
-meta: { name: build, entry: compile, terminal: [done] }
+meta:
+  name: build
+  entry: compile
+  terminal: [done]
+  output: [artifact_path, test_passed, version]
 
 nodes:
   compile:
     actions:
       - id: build
         prompt: 编译项目
-        output: [build_output]
+        output: [artifact_path]
 
       - id: test
         prompt: 运行测试
-        output: [test_result]
+        output: [test_passed]
+
+      - id: tag
+        prompt: 生成版本号
+        output: [version]
 
 edges:
   - from: compile
     to: done
-    handoff:
-      target: ./deploy.ges.yaml
-      map:
-        artifact_path: "{{build_output}}"
-        test_passed: "{{test_result}}"
-        version: "1.0.0"
+    handoff: ./deploy.ges.yaml

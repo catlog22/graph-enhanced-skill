@@ -203,17 +203,16 @@ export class GesExecutor {
   private async executeSkillCall(callerNode: string, action: GesAction): Promise<string | undefined> {
     const rawTarget = expandRun(action.run!, this.bindings);
     const targetPath = resolve(dirname(this.gesFile), expandTemplate(rawTarget, this.state.variables));
-    const childGraph = loadGraph(targetPath);
-    const childName = childGraph.meta.name;
+    const targetGraph = loadGraph(targetPath);
+    const childName = targetGraph.meta.name;
     const childStateFile = resolve(dirname(this.stateFile), `graph-state.${childName}.yaml`);
 
-    const frame = {
+    this.state.call_stack.push({
       caller_node: callerNode,
       caller_action: action.id,
       target: childName,
       child_state_file: childStateFile,
-    };
-    this.state.call_stack.push(frame);
+    });
     this.persist();
 
     this.emit({ type: 'skill_enter', target: childName, caller_node: callerNode, caller_action: action.id });
@@ -231,19 +230,22 @@ export class GesExecutor {
 
     const childFinal = await childExecutor.run();
 
-    const outputKeys = action.output ?? [];
-    for (const key of outputKeys) {
+    const exportKeys = targetGraph.meta.output ?? Object.keys(childFinal.variables);
+    const captureKeys = action.output ?? exportKeys;
+    const allowedKeys = captureKeys.filter(k => exportKeys.includes(k));
+
+    for (const key of allowedKeys) {
       if (key in childFinal.variables) {
         this.state.variables[key] = childFinal.variables[key];
       }
     }
 
-    this.emit({ type: 'skill_exit', target: childName, output_keys: outputKeys });
+    this.emit({ type: 'skill_exit', target: childName, output_keys: allowedKeys });
 
     this.state.call_stack.pop();
     this.persist();
 
-    return outputKeys.length > 0 ? JSON.stringify(pick(childFinal.variables, outputKeys)) : undefined;
+    return allowedKeys.length > 0 ? JSON.stringify(pick(childFinal.variables, allowedKeys)) : undefined;
   }
 
   private async runVerify(verify: string | { run: string }, ctx: PromptContext): Promise<boolean> {
@@ -317,12 +319,10 @@ export class GesExecutor {
   private processHandoff(edge: GesEdge): void {
     if (!edge.handoff) return;
 
-    const payload: Record<string, unknown> = {};
-    for (const [key, val] of Object.entries(edge.handoff.map)) {
-      payload[key] = typeof val === 'string' ? expandTemplate(val, this.state.variables) : val;
-    }
+    const outputKeys = this.graph.meta.output ?? Object.keys(this.state.variables);
+    const payload = pick(this.state.variables, outputKeys);
 
-    const targetPath = resolve(dirname(this.gesFile), edge.handoff.target);
+    const targetPath = resolve(dirname(this.gesFile), edge.handoff);
     if (existsSync(targetPath)) {
       const targetGraph = loadGraph(targetPath);
       if (targetGraph.meta.input) {
@@ -330,8 +330,8 @@ export class GesExecutor {
       }
     }
 
-    this.state.handoff = { target: edge.handoff.target, payload, status: 'pending' };
-    this.emit({ type: 'handoff_ready', target: edge.handoff.target, payload });
+    this.state.handoff = { target: edge.handoff, payload, status: 'pending' };
+    this.emit({ type: 'handoff_ready', target: edge.handoff, payload });
   }
 
   private isTerminal(nodeId: string): boolean {

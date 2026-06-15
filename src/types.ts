@@ -13,6 +13,7 @@ export interface GesMeta {
   terminal: string[];
   description?: string;
   input?: GesInputSchema;
+  output?: string[];
 }
 
 export interface GesInputSchema {
@@ -51,12 +52,7 @@ export interface GesEdge {
   to: string;
   when?: string;
   label?: string;
-  handoff?: GesHandoff;
-}
-
-export interface GesHandoff {
-  target: string;
-  map: Record<string, unknown>;
+  handoff?: string;
 }
 
 // ── Runtime State ──

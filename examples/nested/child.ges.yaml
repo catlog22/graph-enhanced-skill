@@ -1,6 +1,10 @@
 # 子图 — 接收 _input，产出 child_result
 schema: ges/1.0
-meta: { name: child-skill, entry: process, terminal: [done] }
+meta:
+  name: child-skill
+  entry: process
+  terminal: [done]
+  output: [child_result]
 
 nodes:
   process:

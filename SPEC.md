@@ -342,32 +342,38 @@ handoff: null                          # 或 { target, payload, status }
 ### 8.2 交接 handoff（控制权转移）
 
 ```yaml
+meta:
+  name: build
+  output: [artifact_path, version]     # 声明导出变量
+
 edges:
   - from: record
     to: end
-    handoff:                           # 到达终态时建议交接
-      target: ./deploy.ges.yaml
-      map:                             # 当前 variables → 目标 input 映射
-        artifact_path: "{{build_output}}"
-        environment: production
-        version: "{{release_version}}"
+    handoff: ./deploy.ges.yaml         # 纯路径，payload 自动从 meta.output 组装
 ```
 
 **语义**：transfer——当前 skill 结束，控制权永久转移到目标 skill，不回来。
 
+**数据流**：`meta.output` 声明导出 → 自动组装 payload → 目标 `meta.input` 验证。无需手写 map。
+
 | | 嵌套 skill_call | 交接 handoff |
 |---|---|---|
-| 触发 | `run: ./child.ges.yaml` | edge 上的 `handoff` 字段 |
+| 触发 | `run: ./child.ges.yaml` | edge 上 `handoff: ./target.ges.yaml` |
 | 控制流 | call → child runs → return → parent continues | current ends → target starts |
-| 数据 | `prompt` → `_input`；`output` keys 冒泡 | `map` 映射 → 目标 `meta.input` 验证 |
+| 数据 | `prompt` → `_input`；`meta.output` 限定冒泡 | `meta.output` → payload → 目标 `meta.input` |
 | 状态 | 子图独立文件，父 call_stack 记录 | 当前 session 标记 `handed_off`，新 session 创建 |
+
+**`meta.output` 是两者共同的输出契约**：
+- 嵌套：子图 `meta.output` 限定哪些变量可冒泡到父
+- 交接：当前图 `meta.output` 自动组装 handoff payload
+- 未声明 `meta.output` → 所有 variables 可用（向后兼容）
 
 **执行器协议**：
 
 ```
 当 edge 匹配且含 handoff：
-  1. payload = expand(handoff.map, current_variables)
-  2. target_graph = load(handoff.target)
+  1. payload = pick(variables, meta.output ?? all_keys)
+  2. target_graph = load(handoff)
   3. if target_graph.meta.input → validate(payload, input_schema)
   4. state.handoff = { target, payload, status: "pending" }
   5. PERSIST → current session 到达终态
@@ -383,8 +389,8 @@ edges:
 ```
 Done. Session reached terminal "end".
 
-Handoff → deploy (./deploy.ges.yaml)
-  Payload: { artifact_path: "/dist/bundle.js", environment: "production" }
+Handoff → ./deploy.ges.yaml
+  Payload: { artifact_path: "/dist/bundle.js", version: "1.2.0" }
 
   Accept: ges handoff <session-id>
   Skip:   ges handoff <session-id> --skip
@@ -570,7 +576,7 @@ edges:
 
 ---
 
-### 12.6 嵌套 + 交接
+### 12.6 嵌套 + 交接 + 输出契约
 
 ```yaml
 schema: ges/1.0
@@ -583,26 +589,23 @@ meta:
     required: [repo_path]
     properties:
       repo_path: { type: string }
+  output: [artifact_path, test_result]  # 导出契约
 
 nodes:
   build:
     actions:
       - id: compile
         run: "npm run build"
-        output: [build_output]
+        output: [artifact_path]
       - id: test_sub                    # 嵌套：调用子图，返回后继续
-        run: ./test-suite.ges.yaml
-        prompt: "{{build_output}}"
-        output: [test_result]
+        run: ./test-suite.ges.yaml      # 子图的 meta.output 限定可冒泡的变量
+        prompt: "{{artifact_path}}"
+        output: [test_result]           # 从子图 meta.output 中捕获
 
 edges:
   - from: build
     to: done
-    handoff:                            # 交接：结束后转移到 deploy
-      target: ./deploy.ges.yaml
-      map:
-        artifact_path: "{{build_output}}"
-        test_passed: "{{test_result.pass}}"
+    handoff: ./deploy.ges.yaml          # 交接：meta.output 自动组装 payload
 ```
 
 ---

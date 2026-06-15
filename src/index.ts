@@ -5,7 +5,7 @@ export { createState, loadState, saveState } from './state.js';
 export { expandRun, expandTemplate } from './bindings.js';
 export type {
   GesGraph, GesMeta, GesInputSchema, GesNode, GesAction,
-  GesEdge, GesHandoff, GesDecisionTool,
+  GesEdge, GesDecisionTool,
   GesState, CallFrame, GesHandoffState, GesEvent,
   ExecutorHandlers, PromptContext, RunResult,
 } from './types.js';
