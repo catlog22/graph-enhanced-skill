@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, copyFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
-import type { GesState } from './types.ts';
+import type { GesState } from './types.js';
 
 export function createState(source: string, entryNode: string): GesState {
   return {

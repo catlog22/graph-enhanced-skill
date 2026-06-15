@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, resolve, isAbsolute } from 'node:path';
 import { parse as parseYaml } from 'yaml';
-import type { GesGraph } from './types.ts';
+import type { GesGraph } from './types.js';
 
 export function loadGraph(filePath: string): GesGraph {
   const absPath = isAbsolute(filePath) ? filePath : resolve(process.cwd(), filePath);

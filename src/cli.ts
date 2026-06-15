@@ -2,11 +2,11 @@
 import { resolve } from 'node:path';
 import { existsSync, mkdirSync } from 'node:fs';
 import { execSync } from 'node:child_process';
-import { GesExecutor } from './executor.ts';
-import { loadGraph } from './loader.ts';
-import { loadState } from './state.ts';
-import { createSession, listSessions, resolveSession } from './sessions.ts';
-import type { GesEvent, ExecutorHandlers, PromptContext, RunResult } from './types.ts';
+import { GesExecutor } from './executor.js';
+import { loadGraph } from './loader.js';
+import { loadState } from './state.js';
+import { createSession, listSessions, resolveSession } from './sessions.js';
+import type { GesEvent, ExecutorHandlers, PromptContext, RunResult } from './types.js';
 
 const [,, command, ...args] = process.argv;
 

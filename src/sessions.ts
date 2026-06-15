@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { resolve, basename } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { parse as parseYaml } from 'yaml';
-import type { GesState } from './types.ts';
+import type { GesState } from './types.js';
 
 const SESSIONS_ROOT = '.ges-sessions';
 

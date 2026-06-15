@@ -2,10 +2,10 @@ import { resolve, dirname } from 'node:path';
 import type {
   GesGraph, GesState, GesAction, GesNode, GesEvent,
   ExecutorHandlers, PromptContext,
-} from './types.ts';
-import { loadGraph, loadPrompt } from './loader.ts';
-import { createState, loadState, saveState } from './state.ts';
-import { expandRun, expandTemplate } from './bindings.ts';
+} from './types.js';
+import { loadGraph, loadPrompt } from './loader.js';
+import { createState, loadState, saveState } from './state.js';
+import { expandRun, expandTemplate } from './bindings.js';
 
 export interface ExecutorOptions {
   gesFile: string;
