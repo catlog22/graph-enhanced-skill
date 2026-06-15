@@ -70,9 +70,11 @@ export interface CallFrame {
 export type GesEvent =
   | { type: 'node_enter'; node: string }
   | { type: 'node_exit'; node: string; edge_to: string }
-  | { type: 'action_start'; node: string; action: string; mode: 'prompt' | 'run' | 'prompt+run' }
+  | { type: 'action_start'; node: string; action: string; mode: 'prompt' | 'run' | 'prompt+run' | 'skill_call' }
   | { type: 'action_done'; node: string; action: string; output?: Record<string, unknown> }
   | { type: 'action_skip'; node: string; action: string; reason: string }
+  | { type: 'skill_enter'; target: string; caller_node: string; caller_action: string }
+  | { type: 'skill_exit'; target: string; output_keys: string[] }
   | { type: 'verify_pass'; node: string; action: string }
   | { type: 'verify_fail'; node: string; action: string; detail: string }
   | { type: 'edge_eval'; from: string; to: string; when: string | undefined; result: boolean }

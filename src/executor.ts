@@ -1,4 +1,5 @@
 import { resolve, dirname } from 'node:path';
+import { existsSync } from 'node:fs';
 import type {
   GesGraph, GesState, GesAction, GesNode, GesEvent,
   ExecutorHandlers, PromptContext,
@@ -109,6 +110,7 @@ export class GesExecutor {
 
   getState(): GesState { return this.state; }
   getGraph(): GesGraph { return this.graph; }
+  setVariable(key: string, value: unknown): void { this.state.variables[key] = value; }
 
   // ── Internals ──
 
@@ -145,15 +147,17 @@ export class GesExecutor {
     const ctx = this.context(nodeId, action.id);
     const hasRun = !!action.run;
     const hasPrompt = !!action.prompt;
-    const mode = hasRun && hasPrompt ? 'prompt+run' : hasRun ? 'run' : 'prompt';
+    const isSkillCall = hasRun && isGesFile(expandRun(action.run!, this.bindings));
+    const mode = isSkillCall ? 'skill_call' : hasRun && hasPrompt ? 'prompt+run' : hasRun ? 'run' : 'prompt';
 
     this.emit({ type: 'action_start', node: nodeId, action: action.id, mode });
 
     let result: string | undefined;
 
     try {
-      if (hasRun && hasPrompt) {
-        // run + prompt: tool executes with prompt as input
+      if (isSkillCall) {
+        result = await this.executeSkillCall(nodeId, action);
+      } else if (hasRun && hasPrompt) {
         const cmd = this.expandCommand(action.run!);
         const promptText = this.resolvePrompt(action.prompt!);
         const runResult = await this.handlers.onRun(cmd, promptText);
@@ -174,14 +178,12 @@ export class GesExecutor {
       throw err;
     }
 
-    // Capture outputs
     if (action.output && result) {
       for (const key of action.output) {
         this.state.variables[key] = tryParseJson(result) ?? result;
       }
     }
 
-    // Verify
     if (action.verify) {
       const passed = await this.runVerify(action.verify, ctx);
       if (passed) {
@@ -195,6 +197,52 @@ export class GesExecutor {
     }
 
     this.emit({ type: 'action_done', node: nodeId, action: action.id, output: action.output ? pick(this.state.variables, action.output) : undefined });
+  }
+
+  private async executeSkillCall(callerNode: string, action: GesAction): Promise<string | undefined> {
+    const rawTarget = expandRun(action.run!, this.bindings);
+    const targetPath = resolve(dirname(this.gesFile), expandTemplate(rawTarget, this.state.variables));
+    const childGraph = loadGraph(targetPath);
+    const childName = childGraph.meta.name;
+    const childStateFile = resolve(dirname(this.stateFile), `graph-state.${childName}.yaml`);
+
+    const frame = {
+      caller_node: callerNode,
+      caller_action: action.id,
+      target: childName,
+      child_state_file: childStateFile,
+    };
+    this.state.call_stack.push(frame);
+    this.persist();
+
+    this.emit({ type: 'skill_enter', target: childName, caller_node: callerNode, caller_action: action.id });
+
+    const childExecutor = new GesExecutor({
+      gesFile: targetPath,
+      stateDir: dirname(childStateFile),
+      handlers: this.handlers,
+      resume: existsSync(childStateFile),
+    });
+
+    if (action.prompt) {
+      childExecutor.setVariable('_input', this.resolvePrompt(action.prompt));
+    }
+
+    const childFinal = await childExecutor.run();
+
+    const outputKeys = action.output ?? [];
+    for (const key of outputKeys) {
+      if (key in childFinal.variables) {
+        this.state.variables[key] = childFinal.variables[key];
+      }
+    }
+
+    this.emit({ type: 'skill_exit', target: childName, output_keys: outputKeys });
+
+    this.state.call_stack.pop();
+    this.persist();
+
+    return outputKeys.length > 0 ? JSON.stringify(pick(childFinal.variables, outputKeys)) : undefined;
   }
 
   private async runVerify(verify: string | { run: string }, ctx: PromptContext): Promise<boolean> {
@@ -276,6 +324,11 @@ export class GesExecutor {
   private emit(event: GesEvent): void {
     this.handlers.onEvent?.(event);
   }
+}
+
+function isGesFile(ref: string): boolean {
+  const lower = ref.split(/\s/)[0].toLowerCase();
+  return lower.endsWith('.ges.yaml') || lower.endsWith('.ges.yml');
 }
 
 function tryParseJson(s: string): unknown {

@@ -284,6 +284,8 @@ function createCliHandlers(): ExecutorHandlers {
         case 'node_enter': console.log(`\n> ${event.node}`); break;
         case 'node_exit':  console.log(`  -> ${event.edge_to}`); break;
         case 'action_skip': console.log(`  [skip] ${event.action}: ${event.reason}`); break;
+        case 'skill_enter': console.log(`  [call]  → ${event.target} (from ${event.caller_node}.${event.caller_action})`); break;
+        case 'skill_exit':  console.log(`  [return] ← ${event.target} (output: ${event.output_keys.join(', ') || 'none'})`); break;
         case 'verify_fail': console.log(`  [FAIL] ${event.action}`); break;
         case 'stuck': console.error(`  STUCK at ${event.node}`); break;
         case 'done': console.log('\nGraph complete.'); break;

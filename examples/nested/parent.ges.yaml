@@ -1,0 +1,26 @@
+# 父图 — 调用子图 child.ges.yaml 并获取输出
+schema: ges/1.0
+meta: { name: parent-skill, entry: prepare, terminal: [end] }
+
+nodes:
+  prepare:
+    actions:
+      - id: init
+        prompt: 准备任务数据
+
+  delegate:
+    actions:
+      - id: call_child
+        run: ./child.ges.yaml
+        prompt: "需要子图处理的数据"
+        output: [child_result]
+
+  summarize:
+    actions:
+      - id: report
+        prompt: "汇总子图结果: {{child_result}}"
+
+edges:
+  - { from: prepare, to: delegate }
+  - { from: delegate, to: summarize }
+  - { from: summarize, to: end }
