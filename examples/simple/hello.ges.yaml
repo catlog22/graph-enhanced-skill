@@ -1,0 +1,17 @@
+schema: ges/1.0
+meta: { name: hello, entry: start, terminal: [end] }
+
+nodes:
+  start:
+    actions:
+      - id: greet
+        prompt: 向用户打招呼并询问需求
+
+  respond:
+    actions:
+      - id: answer
+        prompt: 根据用户需求给出回答
+
+edges:
+  - { from: start, to: respond }
+  - { from: respond, to: end }

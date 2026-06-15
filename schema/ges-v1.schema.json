@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ges.dev/schema/v1",
+  "title": "GES v1.0 — Graph-Enhanced Skill",
+  "type": "object",
+  "required": ["schema", "meta", "nodes", "edges"],
+  "properties": {
+    "schema": {
+      "const": "ges/1.0"
+    },
+    "meta": {
+      "type": "object",
+      "required": ["name", "entry", "terminal"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "entry": { "type": "string" },
+        "terminal": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "description": { "type": "string" }
+      }
+    },
+    "bindings": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "nodes": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["actions"],
+        "properties": {
+          "actions": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/action" },
+            "minItems": 1
+          },
+          "description": { "type": "string" },
+          "persist": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/edge" }
+    }
+  },
+  "$defs": {
+    "action": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string" },
+        "prompt": { "type": "string" },
+        "run": { "type": "string" },
+        "output": { "type": "array", "items": { "type": "string" } },
+        "verify": {
+          "oneOf": [
+            { "type": "string" },
+            {
+              "type": "object",
+              "required": ["run"],
+              "properties": {
+                "run": { "type": "string" }
+              }
+            }
+          ]
+        },
+        "loop": {
+          "type": "object",
+          "required": ["over", "as"],
+          "properties": {
+            "over": { "type": "string" },
+            "as": { "type": "string" }
+          }
+        },
+        "optional": { "type": "boolean" },
+        "retry": { "type": "integer", "minimum": 0 },
+        "timeout": { "type": "integer", "minimum": 0 },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "schema"],
+            "properties": {
+              "name": { "type": "string" },
+              "description": { "type": "string" },
+              "schema": { "type": "object" }
+            }
+          }
+        }
+      },
+      "anyOf": [
+        { "required": ["prompt"] },
+        { "required": ["run"] }
+      ]
+    },
+    "edge": {
+      "type": "object",
+      "required": ["from", "to"],
+      "properties": {
+        "from": { "type": "string" },
+        "to": { "type": "string" },
+        "when": { "type": "string" },
+        "label": { "type": "string" }
+      }
+    }
+  }
+}
