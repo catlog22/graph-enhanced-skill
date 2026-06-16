@@ -105,3 +105,162 @@ Some prompt
     );
   });
 });
+
+describe('md-loader: bug fixes', () => {
+  it('fix #1: empty frontmatter does not crash', () => {
+    const src = '---\n\n---\n\n<graph>\n<node id="s" entry />\n<node id="e" terminal />\n<edge from="s" to="e" />\n</graph>\n\n## [s]\n\ngo';
+    assert.throws(() => parseGesMarkdown(src), /Missing "name"/);
+  });
+
+  it('fix #2: meta.output scalar normalized to array', () => {
+    const src = `---
+schema: ges/2.0
+name: test
+output: single_key
+---
+
+<graph>
+<node id="s" entry output="single_key" />
+<node id="e" terminal />
+<edge from="s" to="e" />
+</graph>
+
+## [s]
+
+go
+`;
+    const graph = parseGesMarkdown(src);
+    assert.ok(Array.isArray(graph.meta.output));
+    assert.deepStrictEqual(graph.meta.output, ['single_key']);
+  });
+
+  it('fix #3: meta.input missing properties throws', () => {
+    const src = `---
+schema: ges/2.0
+name: test
+input:
+  required:
+    - x
+---
+
+<graph>
+<node id="s" entry />
+<node id="e" terminal />
+<edge from="s" to="e" />
+</graph>
+
+## [s]
+
+go
+`;
+    assert.throws(() => parseGesMarkdown(src), /missing "properties"/i);
+  });
+
+  it('fix #4: > inside quoted attribute values parsed correctly', () => {
+    const src = `---
+schema: ges/2.0
+name: test
+---
+
+<graph>
+<node id="s" entry run="echo test > /dev/null" output="result" />
+<node id="e" terminal />
+<edge from="s" to="e" />
+</graph>
+`;
+    const graph = parseGesMarkdown(src);
+    assert.strictEqual(graph.nodes['s'].actions[0].run, 'echo test > /dev/null');
+  });
+
+  it('fix #6: frontmatter without trailing newline after closing ---', () => {
+    const src = '---\nschema: ges/2.0\nname: no-trail\n---\n<graph>\n<node id="s" entry />\n<node id="e" terminal />\n<edge from="s" to="e" />\n</graph>\n\n## [s]\n\ngo';
+    const graph = parseGesMarkdown(src);
+    assert.strictEqual(graph.meta.name, 'no-trail');
+  });
+
+  it('fix #7: terminal node always has empty actions', () => {
+    const src = `---
+schema: ges/2.0
+name: test
+---
+
+<graph>
+<node id="s" entry />
+<node id="e" terminal run="cleanup.sh" />
+<edge from="s" to="e" />
+</graph>
+
+## [s]
+
+go
+`;
+    const graph = parseGesMarkdown(src);
+    assert.strictEqual(graph.nodes['e'].actions.length, 0);
+  });
+
+  it('fix #8: ## [ref] inside code block ignored', () => {
+    const src = `---
+schema: ges/2.0
+name: test
+---
+
+<graph>
+<node id="s" entry />
+<node id="e" terminal />
+<edge from="s" to="e" />
+</graph>
+
+## [s]
+
+Here is an example:
+\`\`\`
+## [fake_heading]
+\`\`\`
+Real content continues.
+`;
+    const graph = parseGesMarkdown(src);
+    const prompt = graph.nodes['s'].actions[0].prompt!;
+    assert.ok(prompt.includes('Real content continues'));
+    assert.ok(prompt.includes('## [fake_heading]'));
+  });
+
+  it('fix #9: loop attr trims whitespace', () => {
+    const src = `---
+schema: ges/2.0
+name: test
+---
+
+<graph>
+<node id="s" entry loop="over: items , as: item " />
+<node id="e" terminal />
+<edge from="s" to="e" />
+</graph>
+
+## [s]
+
+go
+`;
+    const graph = parseGesMarkdown(src);
+    assert.strictEqual(graph.nodes['s'].actions[0].loop?.as, 'item');
+    assert.strictEqual(graph.nodes['s'].actions[0].loop?.over, 'items');
+  });
+
+  it('fix #10: edge to="," rejects with clear error', () => {
+    const src = `---
+schema: ges/2.0
+name: test
+---
+
+<graph>
+<node id="s" entry />
+<node id="e" terminal />
+<edge from="s" to="," />
+</graph>
+
+## [s]
+
+go
+`;
+    assert.throws(() => parseGesMarkdown(src), /resolves to empty/);
+  });
+});

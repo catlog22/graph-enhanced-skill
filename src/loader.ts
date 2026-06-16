@@ -70,6 +70,9 @@ export function validateGraph(graph: GesGraph, filePath: string): void {
       if (!action.id) errors.push(`Action in node "${nodeId}" missing id`);
       if (actionIds.has(action.id)) errors.push(`Duplicate action id "${action.id}" in node "${nodeId}"`);
       actionIds.add(action.id);
+      if (!action.prompt && !action.run && !isTerminal) {
+        errors.push(`Action "${action.id}" in node "${nodeId}" must have prompt or run`);
+      }
     }
   }
 
