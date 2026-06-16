@@ -49,7 +49,8 @@ function extractGraphBlock(body: string): string | null {
 }
 
 // Fix #4: regex pattern that handles > inside quoted attribute values
-const ATTR_BLOCK = '(?:[^>"\\/]*(?:"[^"]*")?)*';
+// Fix G1: use alternation to prevent empty-match ReDoS
+const ATTR_BLOCK = '(?:[^>"\\/]+|"[^"]*")*';
 
 function buildGraph(fm: Record<string, unknown>, graphXml: string, filePath: string): GesGraph {
   const schema = (fm.schema as string) ?? 'ges/2.0';
@@ -128,8 +129,13 @@ function buildGraph(fm: Record<string, unknown>, graphXml: string, filePath: str
     : undefined;
 
   const rawInput = fm.input as Record<string, unknown> | undefined;
-  if (rawInput && rawInput.required && !rawInput.properties) {
-    throw new Error(`meta.input has "required" but missing "properties" in ${filePath}`);
+  if (rawInput) {
+    if (rawInput.required && !Array.isArray(rawInput.required)) {
+      throw new Error(`meta.input.required must be an array in ${filePath}`);
+    }
+    if (rawInput.required && !rawInput.properties) {
+      throw new Error(`meta.input has "required" but missing "properties" in ${filePath}`);
+    }
   }
 
   const meta: GesMeta = {
@@ -198,7 +204,7 @@ function buildAction(attrs: Record<string, string>): GesAction {
 // Fix #8/#11: detect if an index is inside a fenced code block
 function isInsideCodeFence(body: string, index: number): boolean {
   const before = body.slice(0, index);
-  const fences = before.match(/^```/gm);
+  const fences = before.match(/^(?:```|~~~)/gm);
   return fences != null && fences.length % 2 === 1;
 }
 
