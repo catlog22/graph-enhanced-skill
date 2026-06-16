@@ -38,7 +38,7 @@ describe('executor', () => {
     });
 
     const state = await executor.run();
-    assert.strictEqual(state.current_node, 'end');
+    assert.strictEqual(state.active['end'], null);
     assert.ok(handlers.events.some(e => e.type === 'done'));
 
     rmSync(dir, { recursive: true });
@@ -60,7 +60,7 @@ describe('executor', () => {
     while (!result.done) {
       result = await executor.step();
     }
-    assert.strictEqual(executor.getState().current_node, 'end');
+    assert.ok('end' in executor.getState().active);
 
     rmSync(dir, { recursive: true });
   });
@@ -101,8 +101,8 @@ describe('executor', () => {
       handlers,
     });
 
-    await executor.step(); // implement.code (prompt) → current_action = __done__
-    await executor.step(); // edge eval → review, current_action = null
+    await executor.step(); // implement.code (prompt)
+    await executor.step(); // edge eval → review
     await executor.step(); // review.check (run+prompt)
 
     assert.ok(capturedCmd.includes('maestro delegate --role review'), `Expected binding expansion, got: ${capturedCmd}`);

@@ -1,4 +1,4 @@
-schema: ges/1.0
+schema: ges/1.1
 meta: { name: hello, entry: start, terminal: [end] }
 
 nodes:

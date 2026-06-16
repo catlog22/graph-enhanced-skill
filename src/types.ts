@@ -1,5 +1,5 @@
 export interface GesGraph {
-  schema: 'ges/1.0';
+  schema: 'ges/1.1';
   meta: GesMeta;
   bindings?: Record<string, string>;
   defaults?: Record<string, unknown>;
@@ -14,6 +14,7 @@ export interface GesMeta {
   description?: string;
   input?: GesInputSchema;
   output?: string[];
+  goal?: string;
 }
 
 export interface GesInputSchema {
@@ -48,8 +49,8 @@ export interface GesDecisionTool {
 }
 
 export interface GesEdge {
-  from: string;
-  to: string;
+  from: string | string[];
+  to: string | string[];
   when?: string;
   label?: string;
   handoff?: string;
@@ -58,10 +59,9 @@ export interface GesEdge {
 // ── Runtime State ──
 
 export interface GesState {
-  schema: 'ges-runtime/1.0';
+  schema: 'ges-runtime/1.1';
   source: string;
-  current_node: string;
-  current_action: string | null;
+  active: Record<string, string | null | '__done__' | '__edges__'>;
   iteration: number;
   variables: Record<string, unknown>;
   call_stack: CallFrame[];
@@ -94,7 +94,10 @@ export type GesEvent =
   | { type: 'handoff_ready'; target: string; payload: Record<string, unknown> }
   | { type: 'verify_pass'; node: string; action: string }
   | { type: 'verify_fail'; node: string; action: string; detail: string }
-  | { type: 'edge_eval'; from: string; to: string; when: string | undefined; result: boolean }
+  | { type: 'edge_eval'; from: string | string[]; to: string | string[]; when: string | undefined; result: boolean }
+  | { type: 'fork'; from: string; targets: string[] }
+  | { type: 'join'; sources: string[]; to: string }
+  | { type: 'goal_eval'; expression: string; result: boolean }
   | { type: 'stuck'; node: string; edges_tried: number }
   | { type: 'done' };
 

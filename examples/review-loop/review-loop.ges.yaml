@@ -1,5 +1,5 @@
 # Review loop — implement, review, fix until pass
-schema: ges/1.0
+schema: ges/1.1
 meta: { name: review-loop, entry: implement, terminal: [end] }
 
 bindings:

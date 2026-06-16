@@ -27,11 +27,15 @@ export function loadPrompt(promptRef: string, gesFilePath: string): string {
   return readFileSync(absPath, 'utf-8');
 }
 
+function toArray(v: string | string[]): string[] {
+  return Array.isArray(v) ? v : [v];
+}
+
 function validate(graph: GesGraph, filePath: string): void {
   const errors: string[] = [];
 
-  if (graph.schema !== 'ges/1.0') {
-    errors.push(`Invalid schema: expected "ges/1.0", got "${graph.schema}"`);
+  if (graph.schema !== 'ges/1.1') {
+    errors.push(`Invalid schema: expected "ges/1.1", got "${graph.schema}"`);
   }
   if (!graph.meta?.name) errors.push('meta.name is required');
   if (!graph.meta?.entry) errors.push('meta.entry is required');
@@ -50,8 +54,22 @@ function validate(graph: GesGraph, filePath: string): void {
   const allIds = new Set([...nodeIds, ...terminalIds]);
 
   for (const edge of graph.edges ?? []) {
-    if (!allIds.has(edge.from)) errors.push(`Edge from unknown node: "${edge.from}"`);
-    if (!allIds.has(edge.to)) errors.push(`Edge to unknown node: "${edge.to}"`);
+    for (const f of toArray(edge.from)) {
+      if (!allIds.has(f)) errors.push(`Edge from unknown node: "${f}"`);
+    }
+    for (const t of toArray(edge.to)) {
+      if (!allIds.has(t)) errors.push(`Edge to unknown node: "${t}"`);
+    }
+
+    const fromArr = toArray(edge.from);
+    const toArr = toArray(edge.to);
+    if (fromArr.length > 1 && toArr.length > 1) {
+      errors.push(`Edge cannot have both from[] and to[] as arrays (from: [${fromArr}], to: [${toArr}])`);
+    }
+
+    if (edge.handoff && toArr.length > 1) {
+      errors.push(`Handoff edge cannot fork to multiple targets`);
+    }
   }
 
   for (const [nodeId, node] of Object.entries(graph.nodes ?? {})) {
@@ -65,20 +83,6 @@ function validate(graph: GesGraph, filePath: string): void {
       actionIds.add(action.id);
       if (!action.prompt && !action.run) {
         errors.push(`Action "${action.id}" in node "${nodeId}" must have prompt or run`);
-      }
-    }
-  }
-
-  // Validate binding references in run fields
-  const bindingKeys = new Set(Object.keys(graph.bindings ?? {}));
-  for (const [nodeId, node] of Object.entries(graph.nodes ?? {})) {
-    for (const action of node.actions ?? []) {
-      if (action.run) {
-        const firstWord = action.run.split(/\s/)[0];
-        if (firstWord && !firstWord.includes('/') && !firstWord.includes('\\') && !firstWord.includes('.')) {
-          // Looks like it might be a binding reference — warn if not found
-          // (but could also be a system command like "npm")
-        }
       }
     }
   }

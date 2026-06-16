@@ -5,7 +5,7 @@ import type {
   ExecutorHandlers, PromptContext,
 } from './types.js';
 import { loadGraph, loadPrompt } from './loader.js';
-import { createState, loadState, saveState } from './state.js';
+import { createState, loadState, saveState, activeNode } from './state.js';
 import { expandRun, expandTemplate } from './bindings.js';
 
 export interface ExecutorOptions {
@@ -13,6 +13,10 @@ export interface ExecutorOptions {
   stateDir: string;
   handlers: ExecutorHandlers;
   resume?: boolean;
+}
+
+function toArray(v: string | string[]): string[] {
+  return Array.isArray(v) ? v : [v];
 }
 
 export class GesExecutor {
@@ -44,69 +48,145 @@ export class GesExecutor {
 
   async run(maxIterations = 1000): Promise<GesState> {
     let iterations = 0;
-    while (!this.isTerminal(this.state.current_node)) {
+    while (true) {
       if (++iterations > maxIterations) {
-        throw new Error(`Max iterations (${maxIterations}) exceeded at node "${this.state.current_node}"`);
+        throw new Error(`Max iterations (${maxIterations}) exceeded`);
       }
 
-      const node = this.graph.nodes[this.state.current_node];
-      if (!node) throw new Error(`Node not found: ${this.state.current_node}`);
+      const pending = this.pendingNodes();
+      if (pending.length === 0) {
+        const joinEdge = this.findJoinEdge();
+        if (!joinEdge) {
+          this.emit({ type: 'done' });
+          return this.state;
+        }
+        this.applyJoin(joinEdge);
+        this.state.iteration = iterations;
+        this.persist();
+        continue;
+      }
 
-      this.emit({ type: 'node_enter', node: this.state.current_node });
+      for (const nodeId of pending) {
+        if (this.isTerminal(nodeId)) {
+          this.state.active[nodeId] = '__done__';
+          continue;
+        }
 
-      await this.executeNode(this.state.current_node, node);
+        const node = this.graph.nodes[nodeId];
+        if (!node) throw new Error(`Node not found: ${nodeId}`);
 
-      const edge = await this.evaluateEdges(this.state.current_node);
-      this.emit({ type: 'node_exit', node: this.state.current_node, edge_to: edge.to });
-      this.processHandoff(edge);
+        this.emit({ type: 'node_enter', node: nodeId });
+        await this.executeNode(nodeId, node);
+        this.state.active[nodeId] = '__done__';
 
-      this.state.current_node = edge.to;
-      this.state.current_action = null;
+        if (pending.length === 1) {
+          const edges = await this.evaluateEdges(nodeId);
+          const edge = edges[0];
+          const targets = toArray(edge.to);
+
+          if (targets.length > 1) {
+            this.emit({ type: 'fork', from: nodeId, targets });
+            delete this.state.active[nodeId];
+            for (const t of targets) this.state.active[t] = null;
+          } else {
+            this.emit({ type: 'node_exit', node: nodeId, edge_to: targets[0] });
+            this.processHandoff(edge);
+            delete this.state.active[nodeId];
+            this.state.active[targets[0]] = null;
+          }
+        }
+      }
+
+      if (this.allTerminal()) {
+        this.emit({ type: 'done' });
+        return this.state;
+      }
+
       this.state.iteration = iterations;
       this.persist();
     }
-
-    this.emit({ type: 'done' });
-    return this.state;
   }
 
-  // ── Single step mode: advance one action at a time ──
+  // ── Single step mode ──
 
   async step(): Promise<{ done: boolean; event: GesEvent }> {
-    if (this.isTerminal(this.state.current_node)) {
-      const ev: GesEvent = { type: 'done' };
-      this.emit(ev);
-      return { done: true, event: ev };
+    const pending = this.pendingNodes();
+
+    if (pending.length === 0) {
+      const joinEdge = this.findJoinEdge();
+      if (!joinEdge) {
+        const ev: GesEvent = { type: 'done' };
+        this.emit(ev);
+        return { done: true, event: ev };
+      }
+      const ev = this.applyJoin(joinEdge);
+      this.persist();
+      return { done: this.allTerminal(), event: ev };
     }
 
-    const node = this.graph.nodes[this.state.current_node];
-    if (!node) throw new Error(`Node not found: ${this.state.current_node}`);
+    const nodeId = pending[0];
 
-    const actionIndex = this.currentActionIndex(node);
+    if (this.isTerminal(nodeId)) {
+      this.state.active[nodeId] = '__done__';
+      this.persist();
+      if (this.allTerminal()) {
+        const ev: GesEvent = { type: 'done' };
+        this.emit(ev);
+        return { done: true, event: ev };
+      }
+      return { done: false, event: { type: 'node_exit', node: nodeId, edge_to: '(terminal)' } };
+    }
+
+    const node = this.graph.nodes[nodeId];
+    if (!node) throw new Error(`Node not found: ${nodeId}`);
+
+    const actionId = this.state.active[nodeId];
+    const actionIndex = this.resolveActionIndex(node, actionId);
 
     if (actionIndex >= node.actions.length) {
-      const edge = await this.evaluateEdges(this.state.current_node);
-      const ev: GesEvent = { type: 'node_exit', node: this.state.current_node, edge_to: edge.to };
+      if (pending.length > 1 || this.isJoinSource(nodeId)) {
+        this.state.active[nodeId] = '__done__';
+        this.persist();
+        return { done: false, event: { type: 'node_exit', node: nodeId, edge_to: '(join)' } };
+      }
+
+      const edges = await this.evaluateEdges(nodeId);
+      const edge = edges[0];
+      const targets = toArray(edge.to);
+
+      if (targets.length > 1) {
+        const ev: GesEvent = { type: 'fork', from: nodeId, targets };
+        this.emit(ev);
+        delete this.state.active[nodeId];
+        for (const t of targets) this.state.active[t] = null;
+        this.persist();
+        return { done: false, event: ev };
+      }
+
+      const ev: GesEvent = { type: 'node_exit', node: nodeId, edge_to: targets[0] };
       this.emit(ev);
       this.processHandoff(edge);
-      this.state.current_node = edge.to;
-      this.state.current_action = null;
+      delete this.state.active[nodeId];
+      this.state.active[targets[0]] = null;
       this.persist();
-      return { done: this.isTerminal(edge.to), event: ev };
+      return { done: this.isTerminal(targets[0]), event: ev };
     }
 
     const action = node.actions[actionIndex];
-    this.emit({ type: 'node_enter', node: this.state.current_node });
-    await this.executeAction(this.state.current_node, action);
+    this.emit({ type: 'node_enter', node: nodeId });
+    await this.executeAction(nodeId, action);
 
     const nextIdx = actionIndex + 1;
-    this.state.current_action = nextIdx < node.actions.length
-      ? node.actions[nextIdx].id
-      : '__done__';
+    if (nextIdx < node.actions.length) {
+      this.state.active[nodeId] = node.actions[nextIdx].id;
+    } else if (pending.length > 1 || this.isJoinSource(nodeId)) {
+      this.state.active[nodeId] = '__done__';
+    } else {
+      this.state.active[nodeId] = '__edges__';
+    }
     this.persist();
 
-    const ev: GesEvent = { type: 'action_done', node: this.state.current_node, action: action.id };
-    return { done: false, event: ev };
+    return { done: false, event: { type: 'action_done', node: nodeId, action: action.id } };
   }
 
   getState(): GesState { return this.state; }
@@ -115,12 +195,55 @@ export class GesExecutor {
 
   // ── Internals ──
 
+  private pendingNodes(): string[] {
+    return Object.entries(this.state.active)
+      .filter(([, v]) => v !== '__done__')
+      .map(([k]) => k);
+  }
+
+  private allTerminal(): boolean {
+    return Object.keys(this.state.active).every(k => this.isTerminal(k));
+  }
+
+  private isJoinSource(nodeId: string): boolean {
+    return this.graph.edges.some(e => {
+      const fromArr = toArray(e.from);
+      return fromArr.length > 1 && fromArr.includes(nodeId);
+    });
+  }
+
+  private findJoinEdge(): GesEdge | null {
+    const doneNodes = new Set(
+      Object.entries(this.state.active)
+        .filter(([, v]) => v === '__done__')
+        .map(([k]) => k),
+    );
+    for (const edge of this.graph.edges) {
+      const fromArr = toArray(edge.from);
+      if (fromArr.length > 1 && fromArr.every(n => doneNodes.has(n))) {
+        return edge;
+      }
+    }
+    return null;
+  }
+
+  private applyJoin(edge: GesEdge): GesEvent {
+    const sources = toArray(edge.from);
+    const joinTarget = toArray(edge.to)[0];
+    this.emit({ type: 'join', sources, to: joinTarget });
+
+    for (const s of sources) delete this.state.active[s];
+    this.state.active[joinTarget] = null;
+
+    return { type: 'join', sources, to: joinTarget };
+  }
+
   private async executeNode(nodeId: string, node: GesNode): Promise<void> {
-    const startIdx = this.currentActionIndex(node);
+    const startIdx = this.resolveActionIndex(node, this.state.active[nodeId]);
 
     for (let i = startIdx; i < node.actions.length; i++) {
       const action = node.actions[i];
-      this.state.current_action = action.id;
+      this.state.active[nodeId] = action.id;
 
       if (action.loop) {
         await this.executeLoop(nodeId, action);
@@ -137,7 +260,6 @@ export class GesExecutor {
     if (!Array.isArray(items)) {
       throw new Error(`Loop over "${action.loop!.over}" did not resolve to array`);
     }
-
     for (const item of items) {
       this.state.variables[action.loop!.as] = item;
       await this.executeAction(nodeId, action);
@@ -257,14 +379,27 @@ export class GesExecutor {
     return result.exitCode === 0;
   }
 
-  private async evaluateEdges(fromNode: string): Promise<GesEdge> {
-    const candidates = this.graph.edges.filter(e => e.from === fromNode);
+  private async evaluateEdges(fromNode: string): Promise<GesEdge[]> {
+    const candidates = this.graph.edges.filter(e => {
+      const fromArr = toArray(e.from);
+      return fromArr.length === 1 && fromArr[0] === fromNode;
+    });
+
     if (candidates.length === 0) {
       this.emit({ type: 'stuck', node: fromNode, edges_tried: 0 });
       throw new Error(`STUCK: no edges from node "${fromNode}"`);
     }
 
     const ctx = this.context(fromNode, '');
+
+    if (this.graph.meta.goal) {
+      const goalResult = await this.handlers.onEdgeEval(
+        expandTemplate(this.graph.meta.goal, this.state.variables),
+        ctx,
+      );
+      this.state.variables['goal'] = goalResult;
+      this.emit({ type: 'goal_eval', expression: this.graph.meta.goal, result: goalResult });
+    }
 
     for (const edge of candidates) {
       let result: boolean;
@@ -277,7 +412,7 @@ export class GesExecutor {
         );
       }
       this.emit({ type: 'edge_eval', from: edge.from, to: edge.to, when: edge.when, result });
-      if (result) return edge;
+      if (result) return [edge];
     }
 
     this.emit({ type: 'stuck', node: fromNode, edges_tried: candidates.length });
@@ -309,10 +444,10 @@ export class GesExecutor {
     };
   }
 
-  private currentActionIndex(node: GesNode): number {
-    if (!this.state.current_action) return 0;
-    if (this.state.current_action === '__done__') return node.actions.length;
-    const idx = node.actions.findIndex(a => a.id === this.state.current_action);
+  private resolveActionIndex(node: GesNode, actionId: string | null | '__done__' | '__edges__'): number {
+    if (!actionId) return 0;
+    if (actionId === '__done__' || actionId === '__edges__') return node.actions.length;
+    const idx = node.actions.findIndex(a => a.id === actionId);
     return idx >= 0 ? idx : node.actions.length;
   }
 

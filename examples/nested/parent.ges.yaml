@@ -1,5 +1,5 @@
 # 父图 — 调用子图 child.ges.yaml 并获取输出
-schema: ges/1.0
+schema: ges/1.1
 meta: { name: parent-skill, entry: prepare, terminal: [end] }
 
 nodes:

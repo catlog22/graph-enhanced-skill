@@ -11,8 +11,7 @@ export interface SessionInfo {
   source: string;
   gesFile: string;
   stateDir: string;
-  current_node: string;
-  current_action: string | null;
+  active: Record<string, string | null | '__done__'>;
   iteration: number;
   created_at: string;
 }
@@ -64,8 +63,7 @@ export function listSessions(cwd?: string): SessionInfo[] {
       source: state.source ?? '(not started)',
       gesFile: meta.gesFile,
       stateDir,
-      current_node: state.current_node ?? meta.gesFile,
-      current_action: state.current_action ?? null,
+      active: state.active ?? {},
       iteration: state.iteration ?? 0,
       created_at: meta.created_at,
     });

@@ -1,6 +1,6 @@
 # 构建 skill — 完成后交接给 deploy
 # meta.output 声明导出变量，handoff 自动传递
-schema: ges/1.0
+schema: ges/1.1
 meta:
   name: build
   entry: compile

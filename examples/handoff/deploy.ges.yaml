@@ -1,5 +1,5 @@
 # 部署 skill — 接收构建产物，执行部署
-schema: ges/1.0
+schema: ges/1.1
 meta:
   name: deploy
   entry: prepare

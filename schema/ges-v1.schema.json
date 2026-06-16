@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://ges.dev/schema/v1",
-  "title": "GES v1.0 — Graph-Enhanced Skill",
+  "$id": "https://ges.dev/schema/v1.1",
+  "title": "GES v1.1 — Graph-Enhanced Skill",
   "type": "object",
   "required": ["schema", "meta", "nodes", "edges"],
   "properties": {
     "schema": {
-      "const": "ges/1.0"
+      "const": "ges/1.1"
     },
     "meta": {
       "type": "object",
@@ -15,7 +15,8 @@
         "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
         "entry": { "type": "string" },
         "terminal": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
-        "description": { "type": "string" }
+        "description": { "type": "string" },
+        "goal": { "type": "string" }
       }
     },
     "bindings": {
@@ -44,6 +45,12 @@
     }
   },
   "$defs": {
+    "nodeRef": {
+      "oneOf": [
+        { "type": "string" },
+        { "type": "array", "items": { "type": "string" }, "minItems": 2 }
+      ]
+    },
     "action": {
       "type": "object",
       "required": ["id"],
@@ -97,10 +104,11 @@
       "type": "object",
       "required": ["from", "to"],
       "properties": {
-        "from": { "type": "string" },
-        "to": { "type": "string" },
+        "from": { "$ref": "#/$defs/nodeRef" },
+        "to": { "$ref": "#/$defs/nodeRef" },
         "when": { "type": "string" },
-        "label": { "type": "string" }
+        "label": { "type": "string" },
+        "handoff": { "type": "string" }
       }
     }
   }

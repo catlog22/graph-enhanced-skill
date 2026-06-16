@@ -1,5 +1,5 @@
 # 子图 — 接收 _input，产出 child_result
-schema: ges/1.0
+schema: ges/1.1
 meta:
   name: child-skill
   entry: process

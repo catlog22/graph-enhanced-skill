@@ -1,5 +1,5 @@
 # GES: odyssey-planex — 需求驱动迭代闭环
-schema: ges/1.0
+schema: ges/1.1
 
 meta:
   name: odyssey-planex

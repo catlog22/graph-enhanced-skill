@@ -5,14 +5,23 @@ import type { GesState } from './types.js';
 
 export function createState(source: string, entryNode: string): GesState {
   return {
-    schema: 'ges-runtime/1.0',
+    schema: 'ges-runtime/1.1',
     source,
-    current_node: entryNode,
-    current_action: null,
+    active: { [entryNode]: null },
     iteration: 0,
     variables: {},
     call_stack: [],
   };
+}
+
+export function activeNode(state: GesState): string {
+  const nodes = Object.keys(state.active).filter(k => state.active[k] !== '__done__');
+  return nodes[0] ?? Object.keys(state.active)[0];
+}
+
+export function activeAction(state: GesState): string | null {
+  const node = activeNode(state);
+  return state.active[node] ?? null;
 }
 
 export function loadState(filePath: string): GesState | null {

@@ -46,7 +46,7 @@ async function main() {
   }
 }
 
-// ── load: create session with auto ID ──
+// ── load ──
 
 function cmdLoad(args: string[]) {
   const gesFile = args[0];
@@ -61,7 +61,7 @@ function cmdLoad(args: string[]) {
   console.log(`\nNext: ges next ${id.slice(0, 12)}`);
 }
 
-// ── list: show all sessions ──
+// ── list ──
 
 function cmdList() {
   const sessions = listSessions();
@@ -70,24 +70,24 @@ function cmdList() {
     return;
   }
 
-  const col = { id: 28, node: 16, action: 16, iter: 5 };
+  const col = { id: 28, active: 30, iter: 5 };
   console.log(
-    pad('ID', col.id) + pad('NODE', col.node) + pad('ACTION', col.action) + pad('ITER', col.iter) + 'SOURCE',
+    pad('ID', col.id) + pad('ACTIVE', col.active) + pad('ITER', col.iter) + 'SOURCE',
   );
-  console.log('-'.repeat(col.id + col.node + col.action + col.iter + 20));
+  console.log('-'.repeat(col.id + col.active + col.iter + 20));
 
   for (const s of sessions) {
+    const activeStr = formatActive(s.active);
     console.log(
       pad(s.id, col.id) +
-      pad(s.current_node, col.node) +
-      pad(!s.current_action || s.current_action === '__done__' ? '-' : s.current_action, col.action) +
+      pad(activeStr, col.active) +
       pad(String(s.iteration), col.iter) +
       s.source,
     );
   }
 }
 
-// ── next: advance one action ──
+// ── next ──
 
 async function cmdNext(args: string[]) {
   const session = requireSession(args[0], 'next');
@@ -108,13 +108,12 @@ async function cmdNext(args: string[]) {
     console.log(`Done. Session ${session.id} reached terminal.`);
     printHandoffHint(state, session.id);
   } else {
-    const actionLabel = state.current_action && state.current_action !== '__done__' ? '.' + state.current_action : '';
-    console.log(`State: ${state.current_node}${actionLabel} (iter=${state.iteration})`);
+    console.log(`Active: ${formatActive(state.active)} (iter=${state.iteration})`);
     console.log(`Next:  ges next ${session.id.slice(0, 12)}`);
   }
 }
 
-// ── complete: finish current node, evaluate edges, transition ──
+// ── complete ──
 
 async function cmdComplete(args: string[]) {
   const session = requireSession(args[0], 'complete');
@@ -127,26 +126,28 @@ async function cmdComplete(args: string[]) {
     resume: true,
   });
 
-  const state = executor.getState();
-  const startNode = state.current_node;
-
-  // Execute remaining actions in current node, then transition
   let result = await executor.step();
-  while (!result.done && executor.getState().current_node === startNode) {
+  const startActive = { ...executor.getState().active };
+
+  while (!result.done) {
+    const current = executor.getState().active;
+    const changed = Object.keys(current).some(k => !(k in startActive)) ||
+                    Object.keys(startActive).some(k => !(k in current));
+    if (changed) break;
     result = await executor.step();
   }
 
   const newState = executor.getState();
   console.log('');
   if (result.done) {
-    console.log(`Done. Node "${startNode}" completed → terminal.`);
+    console.log(`Done. Reached terminal.`);
   } else {
-    console.log(`Node "${startNode}" completed → "${newState.current_node}"`);
+    console.log(`Active: ${formatActive(newState.active)}`);
     console.log(`Next: ges next ${session.id.slice(0, 12)}`);
   }
 }
 
-// ── run: execute to completion ──
+// ── run ──
 
 async function cmdRun(args: string[]) {
   const idOrFile = args[0];
@@ -156,7 +157,6 @@ async function cmdRun(args: string[]) {
   let stateDir: string;
   let resume = false;
 
-  // If it looks like a .yaml file, create session first
   if (idOrFile.endsWith('.yaml') || idOrFile.endsWith('.yml')) {
     const graph = loadGraph(idOrFile);
     const sess = createSession(idOrFile, graph.meta.name);
@@ -177,7 +177,7 @@ async function cmdRun(args: string[]) {
   console.log(`  ${Object.keys(executor.getGraph().nodes).length} nodes, ${executor.getGraph().edges.length} edges\n`);
 
   const finalState = await executor.run();
-  console.log(`\nDone. Final: ${finalState.current_node}`);
+  console.log(`\nDone. Active: ${formatActive(finalState.active)}`);
 
   const sessId = stateDir.split(/[\\/]/).pop() ?? '';
   printHandoffHint(finalState, sessId);
@@ -200,18 +200,20 @@ function cmdStatus(args: string[]) {
   if (!state) { console.log('Empty state.'); return; }
 
   const graph = loadGraph(session.gesFile);
-  const nodeNames = Object.keys(graph.nodes);
   const terminalSet = new Set(graph.meta.terminal);
-  const isDone = terminalSet.has(state.current_node);
+  const isDone = Object.keys(state.active).every(
+    k => state.active[k] === '__done__' || terminalSet.has(k),
+  );
 
   console.log(`Session:  ${session.id}`);
   console.log(`Source:   ${state.source}`);
   console.log(`Status:   ${isDone ? 'DONE' : 'RUNNING'}`);
-  console.log(`Node:     ${state.current_node}`);
-  console.log(`Action:   ${!state.current_action || state.current_action === '__done__' ? '(between nodes)' : state.current_action}`);
+  console.log(`Active:   ${formatActive(state.active)}`);
   console.log(`Iter:     ${state.iteration}`);
   console.log(`Vars:     ${Object.keys(state.variables).join(', ') || '(empty)'}`);
   console.log(`Stack:    ${state.call_stack.length} frames`);
+
+  const nodeNames = Object.keys(graph.nodes);
   console.log(`\nGraph: ${nodeNames.join(' → ')}`);
 
   if (!isDone) {
@@ -252,8 +254,14 @@ function cmdViz(args: string[]) {
     lines.push(`  ${t}(("${t}"))`);
   }
   for (const edge of graph.edges) {
+    const froms = Array.isArray(edge.from) ? edge.from : [edge.from];
+    const tos = Array.isArray(edge.to) ? edge.to : [edge.to];
     const label = edge.when ? `|${edge.when}|` : '';
-    lines.push(`  ${edge.from} -->${label} ${edge.to}`);
+    for (const f of froms) {
+      for (const t of tos) {
+        lines.push(`  ${f} -->${label} ${t}`);
+      }
+    }
   }
 
   console.log('```mermaid');
@@ -295,6 +303,9 @@ function createCliHandlers(): ExecutorHandlers {
         case 'skill_exit':    console.log(`  [return] ← ${event.target} (output: ${event.output_keys.join(', ') || 'none'})`); break;
         case 'handoff_ready': console.log(`  [handoff] → ${event.target}`); break;
         case 'verify_fail': console.log(`  [FAIL] ${event.action}`); break;
+        case 'fork': console.log(`  [fork] ${event.from} → [${event.targets.join(', ')}]`); break;
+        case 'join': console.log(`  [join] [${event.sources.join(', ')}] → ${event.to}`); break;
+        case 'goal_eval': console.log(`  [goal] ${event.expression} = ${event.result}`); break;
         case 'stuck': console.error(`  STUCK at ${event.node}`); break;
         case 'done': console.log('\nGraph complete.'); break;
       }
@@ -302,7 +313,7 @@ function createCliHandlers(): ExecutorHandlers {
   };
 }
 
-// ── handoff: accept or skip pending handoff ──
+// ── handoff ──
 
 function cmdHandoff(args: string[]) {
   const session = requireSession(args[0], 'handoff');
@@ -361,6 +372,17 @@ function requireSession(idOrPrefix: string | undefined, cmd: string) {
   const session = resolveSession(idOrPrefix);
   if (!session) { console.error(`Session not found: "${idOrPrefix}". Use: ges list`); process.exit(1); }
   return session;
+}
+
+function formatActive(active: Record<string, string | null | '__done__'>): string {
+  const entries = Object.entries(active);
+  if (entries.length === 0) return '(none)';
+  if (entries.length === 1) {
+    const [node, action] = entries[0];
+    if (action === '__done__') return `${node} ✓`;
+    return action ? `${node}.${action}` : node;
+  }
+  return entries.map(([k, v]) => v === '__done__' ? `${k}✓` : k).join(' | ');
 }
 
 function pad(s: string, len: number): string { return s.padEnd(len); }
