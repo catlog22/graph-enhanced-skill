@@ -1,5 +1,5 @@
 export interface GesGraph {
-  schema: 'ges/1.1';
+  schema: 'ges/2.0';
   meta: GesMeta;
   bindings?: Record<string, string>;
   defaults?: Record<string, unknown>;

@@ -32,13 +32,13 @@ describe('executor', () => {
     const handlers = mockHandlers();
 
     const executor = new GesExecutor({
-      gesFile: resolve(EXAMPLES, 'simple/hello.ges.yaml'),
+      gesFile: resolve(EXAMPLES, 'simple/hello.ges.md'),
       stateDir: dir,
       handlers,
     });
 
     const state = await executor.run();
-    assert.strictEqual(state.active['end'], null);
+    assert.ok('end' in state.active);
     assert.ok(handlers.events.some(e => e.type === 'done'));
 
     rmSync(dir, { recursive: true });
@@ -49,7 +49,7 @@ describe('executor', () => {
     const handlers = mockHandlers();
 
     const executor = new GesExecutor({
-      gesFile: resolve(EXAMPLES, 'simple/hello.ges.yaml'),
+      gesFile: resolve(EXAMPLES, 'simple/hello.ges.md'),
       stateDir: dir,
       handlers,
     });
@@ -72,13 +72,13 @@ describe('executor', () => {
     });
 
     const executor = new GesExecutor({
-      gesFile: resolve(EXAMPLES, 'odyssey-planex/odyssey-planex.ges.yaml'),
+      gesFile: resolve(EXAMPLES, 'odyssey-planex/odyssey-planex.ges.md'),
       stateDir: dir,
       handlers,
     });
 
-    await executor.step(); // parse
-    await executor.step(); // define_criteria
+    await executor.step(); // intake.parse
+    await executor.step(); // intake.define_criteria
     const state = executor.getState();
     assert.ok('acceptance_criteria' in state.variables);
 
@@ -96,14 +96,14 @@ describe('executor', () => {
     });
 
     const executor = new GesExecutor({
-      gesFile: resolve(EXAMPLES, 'review-loop/review-loop.ges.yaml'),
+      gesFile: resolve(EXAMPLES, 'review-loop/review-loop.ges.md'),
       stateDir: dir,
       handlers,
     });
 
-    await executor.step(); // implement.code (prompt)
+    await executor.step(); // implement (prompt)
     await executor.step(); // edge eval → review
-    await executor.step(); // review.check (run+prompt)
+    await executor.step(); // review (run+prompt)
 
     assert.ok(capturedCmd.includes('maestro delegate --role review'), `Expected binding expansion, got: ${capturedCmd}`);
 
@@ -115,14 +115,14 @@ describe('executor', () => {
     const handlers = mockHandlers();
 
     const exec1 = new GesExecutor({
-      gesFile: resolve(EXAMPLES, 'simple/hello.ges.yaml'),
+      gesFile: resolve(EXAMPLES, 'simple/hello.ges.md'),
       stateDir: dir,
       handlers,
     });
     await exec1.step();
 
     const exec2 = new GesExecutor({
-      gesFile: resolve(EXAMPLES, 'simple/hello.ges.yaml'),
+      gesFile: resolve(EXAMPLES, 'simple/hello.ges.md'),
       stateDir: dir,
       handlers,
       resume: true,

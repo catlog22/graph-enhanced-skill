@@ -15,7 +15,7 @@ const USAGE = `
 ges — Graph-Enhanced Skill Executor
 
 Session commands:
-  ges load <file.ges.yaml>       Load graph, create session (auto ID)
+  ges load <file.ges.md>       Load graph, create session (auto ID)
   ges list                       List all sessions
   ges next <id>                  Advance one step (by session ID or prefix)
   ges complete <id>              Complete current node, transition to next
@@ -24,8 +24,8 @@ Session commands:
 
 Inspection:
   ges status <id>                Show session state
-  ges validate <file.ges.yaml>   Validate GES file
-  ges viz <file.ges.yaml>        Print mermaid diagram
+  ges validate <file.ges.md>   Validate GES file
+  ges viz <file.ges.md>        Print mermaid diagram
 `.trim();
 
 async function main() {
@@ -50,7 +50,7 @@ async function main() {
 
 function cmdLoad(args: string[]) {
   const gesFile = args[0];
-  if (!gesFile) { console.error('Usage: ges load <file.ges.yaml>'); process.exit(1); }
+  if (!gesFile) { console.error('Usage: ges load <file.ges.md>'); process.exit(1); }
 
   const graph = loadGraph(gesFile);
   const { id, stateDir } = createSession(gesFile, graph.meta.name);
@@ -66,7 +66,7 @@ function cmdLoad(args: string[]) {
 function cmdList() {
   const sessions = listSessions();
   if (sessions.length === 0) {
-    console.log('No sessions. Use: ges load <file.ges.yaml>');
+    console.log('No sessions. Use: ges load <file.ges.md>');
     return;
   }
 
@@ -151,13 +151,13 @@ async function cmdComplete(args: string[]) {
 
 async function cmdRun(args: string[]) {
   const idOrFile = args[0];
-  if (!idOrFile) { console.error('Usage: ges run <session-id | file.ges.yaml>'); process.exit(1); }
+  if (!idOrFile) { console.error('Usage: ges run <session-id | file.ges.md>'); process.exit(1); }
 
   let gesFile: string;
   let stateDir: string;
   let resume = false;
 
-  if (idOrFile.endsWith('.yaml') || idOrFile.endsWith('.yml')) {
+  if (idOrFile.endsWith('.ges.md')) {
     const graph = loadGraph(idOrFile);
     const sess = createSession(idOrFile, graph.meta.name);
     gesFile = resolve(idOrFile);
@@ -225,7 +225,7 @@ function cmdStatus(args: string[]) {
 
 function cmdValidate(args: string[]) {
   const gesFile = args[0];
-  if (!gesFile) { console.error('Usage: ges validate <file.ges.yaml>'); process.exit(1); }
+  if (!gesFile) { console.error('Usage: ges validate <file.ges.md>'); process.exit(1); }
 
   try {
     const graph = loadGraph(gesFile);
@@ -242,7 +242,7 @@ function cmdValidate(args: string[]) {
 
 function cmdViz(args: string[]) {
   const gesFile = args[0];
-  if (!gesFile) { console.error('Usage: ges viz <file.ges.yaml>'); process.exit(1); }
+  if (!gesFile) { console.error('Usage: ges viz <file.ges.md>'); process.exit(1); }
 
   const graph = loadGraph(gesFile);
   const lines: string[] = ['graph TD'];

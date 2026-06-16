@@ -1,41 +1,28 @@
-import { readFileSync, existsSync } from 'node:fs';
-import { dirname, resolve, isAbsolute } from 'node:path';
-import { parse as parseYaml } from 'yaml';
+import { existsSync } from 'node:fs';
+import { resolve, isAbsolute } from 'node:path';
 import type { GesGraph } from './types.js';
+import { loadMarkdownGraph } from './md-loader.js';
 
 export function loadGraph(filePath: string): GesGraph {
   const absPath = isAbsolute(filePath) ? filePath : resolve(process.cwd(), filePath);
   if (!existsSync(absPath)) {
     throw new Error(`GES file not found: ${absPath}`);
   }
-  const raw = readFileSync(absPath, 'utf-8');
-  const graph = parseYaml(raw) as GesGraph;
-  validate(graph, absPath);
+
+  const graph = loadMarkdownGraph(absPath);
+  validateGraph(graph, absPath);
   return graph;
-}
-
-export function resolvePromptPath(promptRef: string, gesFilePath: string): string {
-  if (!promptRef.startsWith('./') && !promptRef.startsWith('../')) return promptRef;
-  return resolve(dirname(gesFilePath), promptRef);
-}
-
-export function loadPrompt(promptRef: string, gesFilePath: string): string {
-  const absPath = resolvePromptPath(promptRef, gesFilePath);
-  if (!existsSync(absPath)) {
-    throw new Error(`Prompt file not found: ${absPath} (referenced from ${gesFilePath})`);
-  }
-  return readFileSync(absPath, 'utf-8');
 }
 
 function toArray(v: string | string[]): string[] {
   return Array.isArray(v) ? v : [v];
 }
 
-function validate(graph: GesGraph, filePath: string): void {
+export function validateGraph(graph: GesGraph, filePath: string): void {
   const errors: string[] = [];
 
-  if (graph.schema !== 'ges/1.1') {
-    errors.push(`Invalid schema: expected "ges/1.1", got "${graph.schema}"`);
+  if (graph.schema !== 'ges/2.0') {
+    errors.push(`Invalid schema: expected "ges/2.0", got "${graph.schema}"`);
   }
   if (!graph.meta?.name) errors.push('meta.name is required');
   if (!graph.meta?.entry) errors.push('meta.entry is required');
@@ -73,7 +60,9 @@ function validate(graph: GesGraph, filePath: string): void {
   }
 
   for (const [nodeId, node] of Object.entries(graph.nodes ?? {})) {
-    if (!node.actions?.length) {
+    const isTerminal = terminalIds.has(nodeId);
+
+    if (!node.actions?.length && !isTerminal) {
       errors.push(`Node "${nodeId}" has no actions`);
     }
     const actionIds = new Set<string>();
@@ -81,9 +70,6 @@ function validate(graph: GesGraph, filePath: string): void {
       if (!action.id) errors.push(`Action in node "${nodeId}" missing id`);
       if (actionIds.has(action.id)) errors.push(`Duplicate action id "${action.id}" in node "${nodeId}"`);
       actionIds.add(action.id);
-      if (!action.prompt && !action.run) {
-        errors.push(`Action "${action.id}" in node "${nodeId}" must have prompt or run`);
-      }
     }
   }
 

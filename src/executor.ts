@@ -4,7 +4,7 @@ import type {
   GesGraph, GesState, GesAction, GesNode, GesEdge, GesEvent,
   ExecutorHandlers, PromptContext,
 } from './types.js';
-import { loadGraph, loadPrompt } from './loader.js';
+import { loadGraph } from './loader.js';
 import { createState, loadState, saveState, activeNode } from './state.js';
 import { expandRun, expandTemplate } from './bindings.js';
 
@@ -424,9 +424,7 @@ export class GesExecutor {
   }
 
   private resolvePrompt(prompt: string): string {
-    const isPath = prompt.startsWith('./') || prompt.startsWith('../');
-    const raw = isPath ? loadPrompt(prompt, this.gesFile) : prompt;
-    return expandTemplate(raw, this.state.variables);
+    return expandTemplate(prompt, this.state.variables);
   }
 
   private resolveExpression(expr: string): unknown {
@@ -483,8 +481,7 @@ export class GesExecutor {
 }
 
 function isGesFile(ref: string): boolean {
-  const lower = ref.split(/\s/)[0].toLowerCase();
-  return lower.endsWith('.ges.yaml') || lower.endsWith('.ges.yml');
+  return ref.split(/\s/)[0].toLowerCase().endsWith('.ges.md');
 }
 
 function tryParseJson(s: string): unknown {
